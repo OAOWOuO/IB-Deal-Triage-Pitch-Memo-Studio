@@ -1,5 +1,5 @@
 import http from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,8 +8,40 @@ const PORT = Number(process.env.PORT || 4173);
 const IS_DEPLOYED = process.env.RENDER === "true" || process.env.NODE_ENV === "production";
 const HOST = process.env.HOST || (IS_DEPLOYED ? "0.0.0.0" : "127.0.0.1");
 const SEC_USER_AGENT = process.env.SEC_USER_AGENT || "IBDealStudio/1.0 local-research@example.com";
+const SEC_TICKERS_URL = process.env.SEC_TICKERS_URL || "https://www.sec.gov/files/company_tickers.json";
+const CACHE_DIR = path.join(__dirname, ".cache");
+const TICKER_CACHE_FILE = path.join(CACHE_DIR, "sec-company-tickers.json");
 const CACHE_MS = 1000 * 60 * 15;
 const cache = new Map();
+
+const fallbackTickerMap = [
+  ["AAPL", "0000320193", "Apple Inc."],
+  ["MSFT", "0000789019", "Microsoft Corporation"],
+  ["NVDA", "0001045810", "NVIDIA Corporation"],
+  ["GOOGL", "0001652044", "Alphabet Inc."],
+  ["GOOG", "0001652044", "Alphabet Inc."],
+  ["AMZN", "0001018724", "Amazon.com, Inc."],
+  ["META", "0001326801", "Meta Platforms, Inc."],
+  ["TSLA", "0001318605", "Tesla, Inc."],
+  ["IBM", "0000051143", "International Business Machines Corporation"],
+  ["ORCL", "0001341439", "Oracle Corporation"],
+  ["CRM", "0001108524", "Salesforce, Inc."],
+  ["JPM", "0000019617", "JPMorgan Chase & Co."],
+  ["BAC", "0000070858", "Bank of America Corporation"],
+  ["WFC", "0000072971", "Wells Fargo & Company"],
+  ["C", "0000831001", "Citigroup Inc."],
+  ["GS", "0000886982", "The Goldman Sachs Group, Inc."],
+  ["MS", "0000895421", "Morgan Stanley"],
+  ["V", "0001403161", "Visa Inc."],
+  ["MA", "0001141391", "Mastercard Incorporated"],
+  ["AXP", "0000004962", "American Express Company"],
+  ["PYPL", "0001633917", "PayPal Holdings, Inc."],
+  ["BRK-B", "0001067983", "Berkshire Hathaway Inc."],
+  ["UNH", "0000731766", "UnitedHealth Group Incorporated"],
+  ["JNJ", "0000200406", "Johnson & Johnson"],
+  ["XOM", "0000034088", "Exxon Mobil Corporation"],
+  ["PG", "0000080424", "The Procter & Gamble Company"],
+].map(([ticker, cik, title]) => ({ ticker, cik, title, fallback: true }));
 
 const SEC_HEADERS = {
   "User-Agent": SEC_USER_AGENT,
@@ -89,7 +121,11 @@ const server = http.createServer(async (req, res) => {
       target.peers = [];
       const peerPlan = peers.length
         ? { mode: "explicit", tickers: peers, methodology: "Banker-entered peer tickers. System resolves and tags each company; banker remains responsible for comp rationale." }
-        : await suggestPeerUniverse(target, target.acquirer);
+        : await suggestPeerUniverse(target, target.acquirer).catch((error) => ({
+            mode: "none",
+            tickers: [],
+            methodology: `SEC ticker directory was unavailable, so the app did not auto-suggest peers. Add banker-approved peer tickers manually. Detail: ${cleanErrorDetail(error.message || String(error))}`,
+          }));
       target.peerUniverse = {
         mode: peerPlan.mode,
         methodology: peerPlan.methodology,
@@ -164,36 +200,73 @@ function sendText(res, status, text) {
   res.end(text);
 }
 
-async function cached(key, fn, ttl = CACHE_MS) {
+async function cached(key, fn, ttl = CACHE_MS, options = {}) {
   const existing = cache.get(key);
   if (existing && Date.now() - existing.time < ttl) return existing.value;
-  const value = await fn();
-  cache.set(key, { time: Date.now(), value });
-  return value;
+  try {
+    const value = await fn();
+    cache.set(key, { time: Date.now(), value });
+    return value;
+  } catch (error) {
+    if (options.allowStaleOnError && existing) return existing.value;
+    throw error;
+  }
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, { headers: options.headers || SEC_HEADERS });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`Fetch failed ${response.status} for ${url}: ${text.slice(0, 180)}`);
+  const retries = options.retries ?? 3;
+  let lastError;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const response = await fetch(url, { headers: options.headers || SEC_HEADERS });
+    const text = await response.text();
+    if (response.ok) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`Expected JSON from ${url}, received: ${text.slice(0, 180)}`);
+      }
+    }
+    lastError = new Error(fetchErrorMessage(response.status, url, text));
+    lastError.status = response.status;
+    if (shouldRetryStatus(response.status) && attempt < retries - 1) {
+      await delay(retryDelayMs(response, attempt));
+      continue;
+    }
+    throw lastError;
   }
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Expected JSON from ${url}, received: ${text.slice(0, 180)}`);
-  }
+  throw lastError;
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, { headers: { "User-Agent": SEC_USER_AGENT, Accept: "text/csv,text/plain,*/*" } });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Fetch failed ${response.status} for ${url}: ${text.slice(0, 180)}`);
-  return text;
+  const retries = 3;
+  let lastError;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const response = await fetch(url, { headers: { "User-Agent": SEC_USER_AGENT, Accept: "text/csv,text/plain,*/*" } });
+    const text = await response.text();
+    if (response.ok) return text;
+    lastError = new Error(fetchErrorMessage(response.status, url, text));
+    lastError.status = response.status;
+    if (shouldRetryStatus(response.status) && attempt < retries - 1) {
+      await delay(retryDelayMs(response, attempt));
+      continue;
+    }
+    throw lastError;
+  }
+  throw lastError;
 }
 
 async function loadTickerMap() {
-  const raw = await cached("sec-tickers", () => fetchJson("https://www.sec.gov/files/company_tickers.json"), 1000 * 60 * 60 * 6);
+  const raw = await cached("sec-tickers", async () => {
+    try {
+      const live = await fetchJson(SEC_TICKERS_URL, { retries: 4 });
+      await writeDiskCache(TICKER_CACHE_FILE, live);
+      return live;
+    } catch (error) {
+      const disk = await readDiskCache(TICKER_CACHE_FILE);
+      if (disk) return disk;
+      throw error;
+    }
+  }, 1000 * 60 * 60 * 6, { allowStaleOnError: true });
   return Object.values(raw).map((item) => ({
     cik: String(item.cik_str).padStart(10, "0"),
     ticker: String(item.ticker || "").toUpperCase(),
@@ -201,10 +274,50 @@ async function loadTickerMap() {
   }));
 }
 
+function shouldRetryStatus(status) {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function retryDelayMs(response, attempt) {
+  const retryAfter = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter * 1000, 8000);
+  return Math.min(800 * 2 ** attempt, 5000);
+}
+
+function fetchErrorMessage(status, url, text) {
+  if (status === 429 && url.includes("sec.gov")) {
+    return `SEC rate limit reached for ${url}. The studio will use cache/fallback data when available; otherwise wait a few minutes or try a CIK directly. SEC response: ${text.slice(0, 120)}`;
+  }
+  return `Fetch failed ${status} for ${url}: ${text.slice(0, 180)}`;
+}
+
+function cleanErrorDetail(message) {
+  return String(message || "").replace(/\s+/g, " ").slice(0, 180);
+}
+
+async function readDiskCache(filePath) {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.value ? parsed.value : parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDiskCache(filePath, value) {
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, JSON.stringify({ time: new Date().toISOString(), value }), "utf8");
+  } catch {
+    // Disk cache is best-effort; live data should still flow without it.
+  }
+}
+
 async function searchCompanies(q) {
   if (!q || q.length < 1) return [];
   const needle = q.toUpperCase();
-  const map = await loadTickerMap();
+  const map = await loadTickerMap().catch(() => fallbackTickerMap);
   return map
     .filter((item) => item.ticker.includes(needle) || item.title.toUpperCase().includes(needle) || item.cik.includes(needle))
     .slice(0, 12);
@@ -216,10 +329,29 @@ async function resolveCompany(input) {
     return { cik: value.padStart(10, "0"), ticker: "", title: "" };
   }
   const normalized = value.replace(".", "-");
-  const map = await loadTickerMap();
+  let map = [];
+  try {
+    map = await loadTickerMap();
+  } catch (error) {
+    const fallback = fallbackTicker(normalized);
+    if (fallback) return fallback;
+    throw new Error(`Could not load SEC ticker directory for ${input}. Try entering a 10-digit SEC CIK directly or wait a few minutes. Detail: ${cleanErrorDetail(error.message || String(error))}`);
+  }
   const match = map.find((item) => item.ticker === normalized);
+  if (match) return match;
+  const fallback = fallbackTicker(normalized);
+  if (fallback) return fallback;
   if (!match) throw new Error(`Could not resolve ${input} to an SEC company ticker/CIK.`);
-  return match;
+}
+
+function fallbackTicker(normalizedTicker) {
+  const match = fallbackTickerMap.find((item) => item.ticker === normalizedTicker);
+  if (!match) return null;
+  return {
+    ...match,
+    directoryFallback: true,
+    directoryWarning: "SEC company_tickers.json was unavailable or did not resolve this ticker; using a local SEC CIK reference fallback for identity resolution.",
+  };
 }
 
 async function buildCompany(input) {
@@ -242,8 +374,10 @@ async function buildCompany(input) {
     category: submissions.category,
     fiscalYearEnd: submissions.fiscalYearEnd,
     location: submissions.addresses && submissions.addresses.business ? [submissions.addresses.business.city, submissions.addresses.business.stateOrCountry].filter(Boolean).join(", ") : "",
+    directoryFallback: Boolean(resolved.directoryFallback),
+    directoryWarning: resolved.directoryWarning || "",
   };
-  const sources = collectSources(metrics, filings, quote);
+  const sources = collectSources(profile, metrics, filings, quote);
   const risks = buildRisks(profile, metrics, filings, quote);
   const quality = buildQuality(metrics, filings, quote);
   return {
@@ -593,6 +727,7 @@ function buildQuality(metrics, filings, quote) {
 
 function buildRisks(profile, metrics, filings, quote) {
   const risks = [];
+  if (profile.directoryFallback) risks.push({ level: "watch", title: "SEC ticker directory degraded", detail: profile.directoryWarning || "Ticker-to-CIK identity used a local SEC reference fallback because the live SEC ticker directory was unavailable." });
   if (!quote) risks.push({ level: "gap", title: "Quote unavailable", detail: "Market cap and market-based multiples cannot be derived without a public quote." });
   if (!metrics.shares || metrics.shares.value == null) risks.push({ level: "gap", title: "Shares outstanding unavailable", detail: "Market capitalization cannot be fully tied to SEC facts without shares outstanding." });
   if (!metrics.enterpriseValue || metrics.enterpriseValue.value == null) risks.push({ level: "gap", title: "Enterprise value unavailable", detail: "EV requires market cap, debt, and cash. One or more public inputs are missing." });
@@ -608,6 +743,7 @@ function buildRisks(profile, metrics, filings, quote) {
 function buildObservations(profile, metrics, quote) {
   const observations = [];
   observations.push(`SEC identity resolved for ${profile.name} with CIK ${profile.cik}${profile.ticker ? ` and ticker ${profile.ticker}` : ""}.`);
+  if (profile.directoryFallback) observations.push("Ticker-to-CIK resolution used a local SEC reference fallback because the live SEC ticker directory was unavailable.");
   if (quote) observations.push(`Latest public quote loaded from ${quote.source}: close ${quote.close} on ${quote.date}.`);
   if (metrics.marketCap != null) observations.push(`Market capitalization is derived from public quote close multiplied by latest SEC shares outstanding.`);
   if (metrics.evRevenue && metrics.evRevenue.value != null) observations.push(`EV / Revenue is calculable from public EV and latest annual disclosed revenue.`);
@@ -628,10 +764,11 @@ function buildLimitations(metrics, quote) {
   return limitations;
 }
 
-function collectSources(metrics, filings, quote) {
+function collectSources(profile, metrics, filings, quote) {
   const sources = new Set();
   sources.add("SEC EDGAR submissions API: company identity and recent filing metadata");
   sources.add("SEC EDGAR companyfacts API: XBRL-tagged financial facts");
+  if (profile && profile.directoryFallback) sources.add("Local SEC CIK reference fallback: ticker-to-CIK resolution during SEC ticker-directory rate limit");
   if (quote) sources.add(`${quote.source}: delayed public quote for ${quote.symbol}`);
   for (const item of Object.values(metrics)) {
     if (item && typeof item === "object") {
@@ -660,6 +797,7 @@ async function runProductSelfTest() {
     qaCheck("Committee pack builder exists", indexHtml.includes("Committee Pack") && appJs.includes("committeePackTab") && appJs.includes("buildCommitteePack"), "The app can convert a deal packet into an MD / IC review pack."),
     qaCheck("Acquisition recommendation engine exists", appJs.includes("dealRecommendation") && appJs.includes("Preliminary Acquisition Recommendation"), "The app produces a controlled recommend / hold / do-not-recommend acquisition view."),
     qaCheck("Banker valuation workbench exists", appJs.includes("valuationWorkbench") && appJs.includes("Banker Valuation Workbench"), "The app lets users supply explicit valuation drivers without overwriting public-source provenance."),
+    qaCheck("SEC rate-limit resilience exists", serverSource.includes("fallbackTickerMap") && serverSource.includes("readDiskCache") && serverSource.includes("retryDelayMs"), "The server retries SEC 429s, uses stale ticker cache when available, and falls back to local CIK references for common tickers."),
     qaCheck("No preloaded company shortcut buttons", !indexHtml.includes("data-example") && !appJs.includes("data-example"), "No first-screen company shortcuts or canned comps are wired into the product."),
     qaCheck("No hard-coded company examples in UI", !/(AAPL|JPM|MSFT|NVDA|GOOGL)/.test(indexHtml + appJs), "The UI does not steer users toward a fixed demo company universe."),
     qaCheck("Multi-agent memo tab exists", indexHtml.includes("Agents & Harness") && appJs.includes("agentCard"), "Role-based workstreams are exposed in the app."),

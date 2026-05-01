@@ -81,5 +81,6 @@ The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when
 - Product QA Agent: `/api/self-test` checks product thesis, private-target support, absence of company shortcuts, harness availability, and SEC configuration.
 - No fabricated company data, preloaded company shortcuts, preset comps, DCF model inputs, LBO model inputs, control premiums, or invented buyer lists.
 - Missing public data is shown as unavailable and becomes a diligence/control gap.
+- SEC rate-limit resilience: the server retries 429 responses, persists a local SEC ticker-directory cache after successful calls, and can use local SEC CIK reference fallbacks for common tickers when the ticker directory is temporarily unavailable.
 
 This tool is a public-data analytical workpaper. It is not investment, legal, tax, accounting, or regulatory advice.
