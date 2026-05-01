@@ -8,6 +8,18 @@
     error: "",
     result: null,
     selfTest: null,
+    valuationInputs: {
+      sharePrice: "",
+      shares: "",
+      equityValue: "",
+      enterpriseValue: "",
+      netDebt: "",
+      revenue: "",
+      ebitda: "",
+      netIncome: "",
+      bookValue: "",
+      source: ""
+    },
     notes: {
       mandate: "",
       decision: "",
@@ -131,6 +143,70 @@
     return result.peerUniverse.methodology || "";
   }
 
+  function valuationField(key) {
+    return state.valuationInputs[key] || "";
+  }
+
+  function valuationNumber(key) {
+    const raw = valuationField(key).replaceAll(",", "").trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function hasValuationWorkbenchInput() {
+    return Object.entries(state.valuationInputs).some(([key, value]) => key !== "source" && String(value || "").trim() !== "");
+  }
+
+  function workbenchSource() {
+    return state.valuationInputs.source.trim() || "Banker/client-provided valuation input";
+  }
+
+  function valuationWorkbench(result) {
+    const m = result.metrics || {};
+    const source = workbenchSource();
+    const sharePrice = valuationNumber("sharePrice");
+    const shares = valuationNumber("shares");
+    const directEquityValue = valuationNumber("equityValue");
+    const netDebtInput = valuationNumber("netDebt");
+    const directEv = valuationNumber("enterpriseValue");
+    const revenueInput = valuationNumber("revenue");
+    const ebitdaInput = valuationNumber("ebitda");
+    const netIncomeInput = valuationNumber("netIncome");
+    const bookValueInput = valuationNumber("bookValue");
+    const publicRevenue = metricValue(m.revenue);
+    const publicEbitda = metricValue(m.ebitda);
+    const publicNetIncome = metricValue(m.netIncome);
+    const publicBookValue = metricValue(m.equity);
+    const publicNetDebt = metricValue(m.netDebt);
+    const equityValue = directEquityValue != null ? directEquityValue : sharePrice != null && shares != null ? sharePrice * shares : null;
+    const netDebt = netDebtInput != null ? netDebtInput : publicNetDebt != null ? publicNetDebt : null;
+    const enterpriseValue = directEv != null ? directEv : equityValue != null && netDebt != null ? equityValue + netDebt : null;
+    const revenue = revenueInput != null ? revenueInput : publicRevenue != null ? publicRevenue : null;
+    const ebitda = ebitdaInput != null ? ebitdaInput : publicEbitda != null ? publicEbitda : null;
+    const netIncome = netIncomeInput != null ? netIncomeInput : publicNetIncome != null ? publicNetIncome : null;
+    const bookValue = bookValueInput != null ? bookValueInput : publicBookValue != null ? publicBookValue : null;
+    const publicMarketCap = result.mode === "private" ? null : m.marketCap;
+    return {
+      source,
+      inputsUsed: hasValuationWorkbenchInput(),
+      sharePrice,
+      shares,
+      equityValue,
+      netDebt,
+      enterpriseValue,
+      revenue,
+      ebitda,
+      netIncome,
+      bookValue,
+      evRevenue: enterpriseValue != null && revenue > 0 ? enterpriseValue / revenue : null,
+      evEbitda: enterpriseValue != null && ebitda > 0 ? enterpriseValue / ebitda : null,
+      priceEarnings: equityValue != null && netIncome > 0 ? equityValue / netIncome : null,
+      priceBook: equityValue != null && bookValue > 0 ? equityValue / bookValue : null,
+      controlPremium: equityValue != null && publicMarketCap > 0 ? (equityValue / publicMarketCap - 1) * 100 : null
+    };
+  }
+
   function dealRecommendation(result) {
     const harness = result.harness || { gates: [], readyForExternalUse: false };
     const gates = harness.gates || [];
@@ -143,7 +219,7 @@
     if (agentGapCount) reasons.push(`${agentGapCount} agent diligence gap${agentGapCount === 1 ? "" : "s"} visible.`);
     if (result.quality && result.quality.score < 70) reasons.push(`Data completeness is only ${result.quality.score}/100.`);
     if (result.mode !== "private" && result.peerUniverse && result.peerUniverse.mode !== "explicit") reasons.push("Peer universe is not banker-approved yet.");
-    if (result.mode === "private" && !hasValue(result.metrics.enterpriseValue)) reasons.push("No explicit valuation or purchase price input was provided.");
+    if (result.mode === "private" && !hasValue(result.metrics.enterpriseValue) && !valuationWorkbench(result).enterpriseValue) reasons.push("No explicit valuation or purchase price input was provided.");
 
     if (criticalGaps.length || (result.quality && result.quality.score < 50)) {
       return {
@@ -572,12 +648,20 @@
     if (action.dataset.action === "run-self-test") {
       runSelfTest();
     }
+    if (action.dataset.action === "apply-valuation") {
+      showToast("Banker valuation inputs applied.");
+      render();
+    }
   });
 
   document.addEventListener("input", (event) => {
     const note = event.target.closest("[data-note]");
     if (note) {
       state.notes[note.dataset.note] = note.value;
+    }
+    const valuationInput = event.target.closest("[data-valuation]");
+    if (valuationInput) {
+      state.valuationInputs[valuationInput.dataset.valuation] = valuationInput.value;
     }
   });
 
@@ -829,6 +913,7 @@
   function valuationTab() {
     const r = state.result;
     const m = r.metrics;
+    const workbench = valuationWorkbench(r);
     const rows = r.mode === "private"
       ? [
           ["Provided enterprise value", metricValue(m.enterpriseValue), sourceCaption(m.enterpriseValue)],
@@ -865,6 +950,68 @@
       <section class="panel">
         ${simpleRows(rows)}
       </section>
+      ${valuationWorkbenchPanel(workbench)}
+    `;
+  }
+
+  function valuationWorkbenchPanel(workbench) {
+    const rows = [
+      ["Implied equity value", workbench.equityValue, workbench.equityValue == null ? "Requires direct equity value or share price x shares" : workbench.source],
+      ["Implied enterprise value", workbench.enterpriseValue, workbench.enterpriseValue == null ? "Requires direct EV or equity value + net debt" : workbench.source],
+      ["Workbench EV / Revenue", workbench.evRevenue, workbench.evRevenue == null ? "Requires EV and revenue input or source metric" : workbench.source],
+      ["Workbench EV / EBITDA", workbench.evEbitda, workbench.evEbitda == null ? "Requires EV and EBITDA input or source metric" : workbench.source],
+      ["Workbench P / E", workbench.priceEarnings, workbench.priceEarnings == null ? "Requires equity value and net income" : workbench.source],
+      ["Workbench P / Book", workbench.priceBook, workbench.priceBook == null ? "Requires equity value and book equity" : workbench.source],
+      ["Implied control premium", workbench.controlPremium, workbench.controlPremium == null ? "Requires banker equity value and public market cap" : workbench.source]
+    ];
+    return `
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Banker Valuation Workbench</p>
+            <h2>Use explicit valuation inputs when public market data is missing</h2>
+          </div>
+          <button class="secondary-button" type="button" data-action="apply-valuation">Apply inputs</button>
+        </div>
+        <div class="notice strong">
+          These fields do not overwrite public data. They create a separate banker-input valuation view so the memo can show useful multiples while preserving provenance.
+        </div>
+        <div class="valuation-input-grid">
+          ${valuationInput("sharePrice", "Share price / offer price", "Per-share price, if supplied")}
+          ${valuationInput("shares", "Diluted shares", "Shares used for equity value")}
+          ${valuationInput("equityValue", "Equity value", "Direct equity value, optional")}
+          ${valuationInput("enterpriseValue", "Enterprise value", "Direct EV / purchase price, optional")}
+          ${valuationInput("netDebt", "Net debt", "Debt minus cash, if supplied")}
+          ${valuationInput("revenue", "Revenue", "Override/source metric for multiples")}
+          ${valuationInput("ebitda", "EBITDA", "Override/source metric for multiples")}
+          ${valuationInput("netIncome", "Net income", "For P / E")}
+          ${valuationInput("bookValue", "Book equity", "For P / Book")}
+          <div class="field wide-field">
+            <label for="valuationSourceInput">Input source / approval basis</label>
+            <input id="valuationSourceInput" data-valuation="source" autocomplete="off" value="${escapeHtml(valuationField("source"))}" placeholder="Board materials, banker model, management case, sponsor bid, or committee input" />
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Workbench output</th><th>Value</th><th>Source / logic</th></tr></thead>
+            <tbody>
+              ${rows.map(([label, value, source]) => {
+                const display = label.includes("EV /") || label.includes("P /") ? fmt(value, { type: "multiple" }) : label.includes("premium") ? fmt(value, { type: "pct" }) : fmt(value);
+                return `<tr><td><strong>${escapeHtml(label)}</strong></td><td>${escapeHtml(display)}</td><td>${escapeHtml(source)}</td></tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }
+
+  function valuationInput(key, label, placeholder) {
+    return `
+      <div class="field">
+        <label for="valuation-${key}">${escapeHtml(label)}</label>
+        <input id="valuation-${key}" data-valuation="${escapeHtml(key)}" inputmode="decimal" autocomplete="off" value="${escapeHtml(valuationField(key))}" placeholder="${escapeHtml(placeholder)}" />
+      </div>
     `;
   }
 
@@ -1269,8 +1416,8 @@
       {
         name: "Valuation and comps",
         owner: valuationAgent ? valuationAgent.role : "Valuation analyst",
-        status: valuationAgent ? valuationAgent.status : "watch",
-        output: r.mode === "private" ? "Only explicitly provided valuation inputs and derived multiples." : `${peerUniverseLabel(r)}; market-derived EV, trading multiples, and peer approval status.`,
+        status: valuationWorkbench(r).inputsUsed ? "green" : valuationAgent ? valuationAgent.status : "watch",
+        output: valuationWorkbench(r).inputsUsed ? "Banker valuation workbench is active with explicit valuation drivers and derived multiples." : r.mode === "private" ? "Only explicitly provided valuation inputs and derived multiples." : `${peerUniverseLabel(r)}; market-derived EV, trading multiples, and peer approval status.`,
         control: peerGate ? `${peerGate.label}: ${peerGate.status}` : "Valuation input gate"
       },
       {
@@ -1418,7 +1565,7 @@
             ${rows
               .map(([label, value, source]) => {
                 const display =
-                  label.includes("EV /") || label.includes("P /") ? fmt(value, { type: "multiple" }) : label.includes("price") ? fmt(value, { type: "price" }) : fmt(value);
+                  label.includes("EV /") || label.includes("P /") ? fmt(value, { type: "multiple" }) : label.toLowerCase().includes("premium") ? fmt(value, { type: "pct" }) : label.toLowerCase().includes("share") ? fmt(value, { type: "integer" }) : label.includes("price") ? fmt(value, { type: "price" }) : fmt(value);
                 return `<tr><td><strong>${escapeHtml(label)}</strong></td><td>${escapeHtml(display)}</td><td>${escapeHtml(source || "")}</td></tr>`;
               })
               .join("")}
@@ -1551,6 +1698,7 @@
     lines.push("4. Public Trading Snapshot");
     lines.push(`Share price: ${fmt(r.quote && r.quote.close, { type: "price" })}. Market cap: ${fmt(m.marketCap)}. Enterprise value: ${fmt(metricValue(m.enterpriseValue))}.`);
     lines.push(`EV / Revenue: ${fmt(metricValue(m.evRevenue), { type: "multiple" })}. EV / EBITDA: ${fmt(metricValue(m.evEbitda), { type: "multiple" })}. P / E: ${fmt(metricValue(m.priceEarnings), { type: "multiple" })}. P / Book: ${fmt(metricValue(m.priceBook), { type: "multiple" })}.`);
+    appendValuationWorkbenchLines(lines, r);
     lines.push("");
     lines.push("5. Reported Financial Profile");
     lines.push(`Revenue: ${fmt(metricValue(m.revenue))}. Revenue growth: ${fmt(metricValue(m.revenueGrowth), { type: "pct" })}. Net income: ${fmt(metricValue(m.netIncome))}. Free cash flow: ${fmt(metricValue(m.freeCashFlow))}.`);
@@ -1623,6 +1771,7 @@
     lines.push(`Revenue: ${fmt(metricValue(m.revenue))}. EBITDA: ${fmt(metricValue(m.ebitda))}. EBITDA margin: ${fmt(metricValue(m.ebitdaMargin), { type: "pct" })}.`);
     lines.push(`Cash: ${fmt(metricValue(m.cash))}. Debt: ${fmt(metricValue(m.debt))}. Net debt: ${fmt(metricValue(m.netDebt))}.`);
     lines.push(`Provided enterprise value: ${fmt(metricValue(m.enterpriseValue))}. Provided EV / Revenue: ${fmt(metricValue(m.evRevenue), { type: "multiple" })}. Provided EV / EBITDA: ${fmt(metricValue(m.evEbitda), { type: "multiple" })}.`);
+    appendValuationWorkbenchLines(lines, r);
     lines.push("");
     lines.push("6. Diligence Flags");
     r.risks.forEach((risk) => lines.push(`- ${risk.title}: ${risk.detail}`));
@@ -1665,6 +1814,8 @@
       lines.push(`  Output: ${section.output}`);
     });
     lines.push("");
+    appendValuationWorkbenchLines(lines, r);
+    lines.push("");
     lines.push("4. Diligence Request List");
     const diligence = committeeDiligenceItems(r);
     if (diligence.length) diligence.forEach((item) => lines.push(`- ${item}`));
@@ -1676,6 +1827,21 @@
     lines.push("- Private-company metrics remain banker/client-provided and require diligence tie-out.");
     lines.push("- Open harness gates keep the pack in internal-review mode.");
     return lines.join("\n");
+  }
+
+  function appendValuationWorkbenchLines(lines, result) {
+    const workbench = valuationWorkbench(result);
+    if (!workbench.inputsUsed) return;
+    lines.push("");
+    lines.push("Banker Valuation Workbench");
+    lines.push(`Source / approval basis: ${workbench.source}.`);
+    lines.push(`- Implied equity value: ${fmt(workbench.equityValue)}.`);
+    lines.push(`- Implied enterprise value: ${fmt(workbench.enterpriseValue)}.`);
+    lines.push(`- Workbench EV / Revenue: ${fmt(workbench.evRevenue, { type: "multiple" })}.`);
+    lines.push(`- Workbench EV / EBITDA: ${fmt(workbench.evEbitda, { type: "multiple" })}.`);
+    lines.push(`- Workbench P / E: ${fmt(workbench.priceEarnings, { type: "multiple" })}.`);
+    lines.push(`- Workbench P / Book: ${fmt(workbench.priceBook, { type: "multiple" })}.`);
+    lines.push(`- Implied control premium: ${fmt(workbench.controlPremium, { type: "pct" })}.`);
   }
 
   function copyMemo() {

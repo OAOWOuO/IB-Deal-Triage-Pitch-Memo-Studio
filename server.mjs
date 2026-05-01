@@ -659,6 +659,7 @@ async function runProductSelfTest() {
     qaCheck("Agent workflow map exists", serverSource.includes("workflowStep") && appJs.includes("agentWorkflowPanel"), "Agents expose step, trigger, input, output, decision use, and control gate metadata."),
     qaCheck("Committee pack builder exists", indexHtml.includes("Committee Pack") && appJs.includes("committeePackTab") && appJs.includes("buildCommitteePack"), "The app can convert a deal packet into an MD / IC review pack."),
     qaCheck("Acquisition recommendation engine exists", appJs.includes("dealRecommendation") && appJs.includes("Preliminary Acquisition Recommendation"), "The app produces a controlled recommend / hold / do-not-recommend acquisition view."),
+    qaCheck("Banker valuation workbench exists", appJs.includes("valuationWorkbench") && appJs.includes("Banker Valuation Workbench"), "The app lets users supply explicit valuation drivers without overwriting public-source provenance."),
     qaCheck("No preloaded company shortcut buttons", !indexHtml.includes("data-example") && !appJs.includes("data-example"), "No first-screen company shortcuts or canned comps are wired into the product."),
     qaCheck("No hard-coded company examples in UI", !/(AAPL|JPM|MSFT|NVDA|GOOGL)/.test(indexHtml + appJs), "The UI does not steer users toward a fixed demo company universe."),
     qaCheck("Multi-agent memo tab exists", indexHtml.includes("Agents & Harness") && appJs.includes("agentCard"), "Role-based workstreams are exposed in the app."),

@@ -51,6 +51,10 @@ The Committee Pack tab turns the same controlled deal packet into an MD / IC rev
 
 The studio now produces a preliminary acquisition recommendation: recommend acquisition path, hold / do not approve yet, or do not recommend acquisition on current evidence. The recommendation is driven by harness gates, data completeness, agent gaps, peer approval status, and private valuation support, not fabricated banker judgment.
 
+## Banker Valuation Workbench
+
+When public quote data or source metrics are unavailable, users can enter explicit banker/client-approved valuation drivers such as offer price, diluted shares, equity value, enterprise value, net debt, revenue, EBITDA, net income, and book equity. The workbench calculates implied multiples separately from public-source outputs and labels them as banker inputs.
+
 ## Deploy On Render
 
 1. Push this folder to a GitHub repository.

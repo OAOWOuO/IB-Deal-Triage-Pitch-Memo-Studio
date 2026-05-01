@@ -248,6 +248,18 @@ h3 {
   align-items: end;
 }
 
+.valuation-input-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+  align-items: end;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .hidden {
   display: none !important;
 }
@@ -736,6 +748,7 @@ td {
 @media (max-width: 1080px) {
   .deal-party-grid,
   .private-form,
+  .valuation-input-grid,
   .status-strip,
   .grid-4,
   .agent-context-grid,
@@ -758,6 +771,7 @@ td {
 
   .deal-party-grid,
   .private-form,
+  .valuation-input-grid,
   .status-strip,
   .grid-2,
   .grid-3,
