@@ -131,6 +131,47 @@
     return result.peerUniverse.methodology || "";
   }
 
+  function dealRecommendation(result) {
+    const harness = result.harness || { gates: [], readyForExternalUse: false };
+    const gates = harness.gates || [];
+    const nonAdvisoryGaps = gates.filter((gate) => gate.status !== "pass" && gate.severity !== "advisory");
+    const criticalGaps = gates.filter((gate) => gate.status !== "pass" && gate.severity === "critical");
+    const agentGapCount = (result.agents || []).reduce((sum, agent) => sum + ((agent.gaps || []).length), 0);
+    const reasons = [];
+    if (criticalGaps.length) reasons.push(`${criticalGaps.length} critical control gate${criticalGaps.length === 1 ? "" : "s"} open.`);
+    if (nonAdvisoryGaps.length) reasons.push(`${nonAdvisoryGaps.length} non-advisory readiness gate${nonAdvisoryGaps.length === 1 ? "" : "s"} not cleared.`);
+    if (agentGapCount) reasons.push(`${agentGapCount} agent diligence gap${agentGapCount === 1 ? "" : "s"} visible.`);
+    if (result.quality && result.quality.score < 70) reasons.push(`Data completeness is only ${result.quality.score}/100.`);
+    if (result.mode !== "private" && result.peerUniverse && result.peerUniverse.mode !== "explicit") reasons.push("Peer universe is not banker-approved yet.");
+    if (result.mode === "private" && !hasValue(result.metrics.enterpriseValue)) reasons.push("No explicit valuation or purchase price input was provided.");
+
+    if (criticalGaps.length || (result.quality && result.quality.score < 50)) {
+      return {
+        status: "gap",
+        label: "Do not recommend acquisition on current evidence",
+        headline: "Do not approve an acquisition recommendation yet.",
+        rationale: reasons.length ? reasons : ["Source support is too limited for an acquisition recommendation."],
+        nextStep: "Resolve critical gates, source gaps, and diligence evidence before re-opening the acquisition question."
+      };
+    }
+    if (!harness.readyForExternalUse || nonAdvisoryGaps.length || (result.mode !== "private" && result.peerUniverse && result.peerUniverse.mode !== "explicit")) {
+      return {
+        status: "watch",
+        label: "Hold / do not approve acquisition yet",
+        headline: "Keep the case in diligence and internal review.",
+        rationale: reasons.length ? reasons : ["The deal packet is useful for triage, but not yet cleared for an acquisition recommendation."],
+        nextStep: "Clear open gates, approve or replace the peer universe, and document the banker decision ask."
+      };
+    }
+    return {
+      status: "green",
+      label: "Recommend acquisition path",
+      headline: "Recommend moving the acquisition case into committee approval discussion.",
+      rationale: reasons.length ? reasons : ["Core readiness gates are cleared and agent workstreams support an acquisition path discussion."],
+      nextStep: "Use the committee pack for MD / IC review; final approval still requires banker, legal, tax, accounting, regulatory, and client sign-off."
+    };
+  }
+
   async function fetchCompany(ticker, peers, acquirer) {
     state.loading = true;
     state.error = "";
@@ -654,7 +695,25 @@
   function overviewTab() {
     const r = state.result;
     const m = r.metrics;
+    const recommendation = dealRecommendation(r);
     return `
+      <section class="panel recommendation-panel ${agentStatusClass(recommendation.status)}">
+        <div class="panel-heading compact">
+          <div>
+            <p class="eyebrow">Preliminary Acquisition Recommendation</p>
+            <h2>${escapeHtml(recommendation.label)}</h2>
+          </div>
+          <span class="status-chip ${agentStatusClass(recommendation.status)}">${escapeHtml(recommendation.status)}</span>
+        </div>
+        <div class="notice strong">
+          <strong>${escapeHtml(recommendation.headline)}</strong><br>
+          ${escapeHtml(recommendation.nextStep)}
+        </div>
+        <ul class="section-list">
+          ${recommendation.rationale.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </section>
+
       <section class="panel">
         <div class="panel-heading">
           <div>
@@ -1105,6 +1164,7 @@
     const harness = r.harness || { gates: [], level: r.quality.level, score: r.quality.score, disposition: "Readiness not available." };
     const sections = committeePackSections(r);
     const diligence = committeeDiligenceItems(r);
+    const recommendation = dealRecommendation(r);
     return `
       <section class="panel">
         <div class="panel-heading">
@@ -1122,10 +1182,10 @@
           what remains open, and what cannot be concluded without banker/client inputs.
         </div>
         <div class="metric-grid compact-metrics">
+          ${metric("Recommendation", recommendation.label, recommendation.nextStep)}
           ${metric("Readiness", `${harness.level || "Unavailable"} / ${harness.score || 0}`, harness.disposition || "")}
           ${metric("Decision ask", state.notes.decision || "Not provided", "Add in Case Controls before external committee use")}
           ${metric("Deal parties", `${targetLabel(r)} -> ${acquirerLabel(r)}`, "Target / seller and optional acquirer / buyer")}
-          ${metric("Use boundary", harness.readyForExternalUse ? "External-ready draft" : "Internal review only", harness.readyForExternalUse ? "Core gates cleared" : "Open gates or banker inputs remain")}
         </div>
       </section>
 
@@ -1452,6 +1512,7 @@
     const r = state.result;
     if (r.mode === "private") return buildPrivateMemo(r);
     const m = r.metrics;
+    const recommendation = dealRecommendation(r);
     const lines = [];
     lines.push(`${r.profile.name} (${r.profile.ticker || r.profile.cik}) - Public Data Deal Triage Memo`);
     lines.push(`Generated: ${new Date().toLocaleString()}`);
@@ -1460,6 +1521,8 @@
     lines.push(`This memo uses public SEC EDGAR filings/XBRL company facts and public market quote data only. No fabricated company data, banker assumptions, DCF, LBO, synergy, or control premium inputs are included.`);
     lines.push(`SEC CIK: ${r.profile.cik}. Latest filing shown: ${r.filings[0] ? `${r.filings[0].form} filed ${r.filings[0].filingDate}` : "not available"}.`);
     lines.push(`Deal parties: target / seller is ${r.profile.name}; acquirer / buyer is ${r.acquirer ? r.acquirer.profile.name : "not selected"}.`);
+    lines.push(`Preliminary acquisition recommendation: ${recommendation.label}. ${recommendation.nextStep}`);
+    recommendation.rationale.forEach((item) => lines.push(`- Recommendation rationale: ${item}`));
     lines.push("");
     lines.push("2. Agent Workstream Readout");
     if (r.agents && r.agents.length) {
@@ -1524,6 +1587,7 @@
 
   function buildPrivateMemo(r) {
     const m = r.metrics;
+    const recommendation = dealRecommendation(r);
     const lines = [];
     lines.push(`${r.profile.name} - Private / Confidential Acquisition Triage Memo`);
     lines.push(`Generated: ${new Date().toLocaleString()}`);
@@ -1532,6 +1596,8 @@
     lines.push("This memo turns a non-public acquisition target into a decision-ready triage workpaper by separating banker/client-provided facts, unavailable assumptions, diligence gaps, and review gates.");
     lines.push("A target does not need to be public to be acquired. For private targets, the evidence base shifts to authorized private materials and diligence validation.");
     lines.push(`Deal parties: target / seller is ${r.profile.name}; acquirer / buyer is ${r.privateContext.buyerName || "not selected"}.`);
+    lines.push(`Preliminary acquisition recommendation: ${recommendation.label}. ${recommendation.nextStep}`);
+    recommendation.rationale.forEach((item) => lines.push(`- Recommendation rationale: ${item}`));
     lines.push("");
     lines.push("2. Source Basis");
     lines.push(`Source package: ${r.privateContext.sourceBasis}. Financial period: ${r.privateContext.period}.`);
@@ -1576,11 +1642,15 @@
   function buildCommitteePack() {
     const r = state.result;
     const harness = r.harness || { level: "Unavailable", score: 0, disposition: "Readiness not available.", gates: [] };
+    const recommendation = dealRecommendation(r);
     const lines = [];
     lines.push(`${r.profile.name} - Committee Review Pack`);
     lines.push(`Generated: ${new Date().toLocaleString()}`);
     lines.push("");
     lines.push("1. Executive Readout");
+    lines.push(`Preliminary acquisition recommendation: ${recommendation.label}.`);
+    lines.push(`Recommendation next step: ${recommendation.nextStep}`);
+    recommendation.rationale.forEach((item) => lines.push(`- Recommendation rationale: ${item}`));
     lines.push(`Readiness: ${harness.level} / ${harness.score}. ${harness.disposition}`);
     lines.push(`Decision ask: ${state.notes.decision || "Not provided."}`);
     lines.push(`Use boundary: ${harness.readyForExternalUse ? "External-ready draft." : "Internal review only until open gates and banker inputs are cleared."}`);

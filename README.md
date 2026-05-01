@@ -47,6 +47,10 @@ The app exposes each agent as an auditable deal-workflow step instead of a gener
 
 The Committee Pack tab turns the same controlled deal packet into an MD / IC review agenda with executive readout, deal parties, financial profile, valuation and comps status, risk and diligence requests, source appendix, distribution controls, and copy/download actions.
 
+## Recommendation Guardrail
+
+The studio now produces a preliminary acquisition recommendation: recommend acquisition path, hold / do not approve yet, or do not recommend acquisition on current evidence. The recommendation is driven by harness gates, data completeness, agent gaps, peer approval status, and private valuation support, not fabricated banker judgment.
+
 ## Deploy On Render
 
 1. Push this folder to a GitHub repository.
