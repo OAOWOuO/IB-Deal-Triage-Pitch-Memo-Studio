@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ib-live-deal-studio
+    name: ib-deal-triage-pitch-memo-studio
     runtime: node
     plan: free
     region: oregon
