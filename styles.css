@@ -432,10 +432,64 @@ h3 {
   margin-top: 14px;
 }
 
+.agent-context-grid {
+  display: grid;
+  grid-template-columns: 0.75fr 1.35fr 0.9fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.agent-context-grid > div {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcf8;
+}
+
+.agent-context-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.agent-context-grid strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.tag-list span {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.compact-metrics {
+  margin-top: 12px;
+}
+
+.compact-metrics .metric {
+  min-height: 82px;
 }
 
 .metric {
@@ -489,6 +543,10 @@ h3 {
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
+}
+
+.workflow-table table {
+  min-width: 1120px;
 }
 
 table {
@@ -606,6 +664,34 @@ td {
   line-height: 1.42;
 }
 
+.workflow-rail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workflow-rail > div {
+  min-height: 110px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcf8;
+}
+
+.workflow-rail strong {
+  display: block;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.workflow-rail span {
+  display: block;
+  margin-top: 8px;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -652,6 +738,8 @@ td {
   .private-form,
   .status-strip,
   .grid-4,
+  .agent-context-grid,
+  .workflow-rail,
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -675,6 +763,8 @@ td {
   .grid-3,
   .grid-4,
   .agent-grid,
+  .agent-context-grid,
+  .workflow-rail,
   .metric-grid {
     grid-template-columns: 1fr;
   }

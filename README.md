@@ -30,6 +30,19 @@ By default, the harness checks the server health endpoint, static assets, the Pr
 HARNESS_TICKER="YOUR_TICKER" HARNESS_PEERS="PEER1,PEER2" npm run harness
 ```
 
+## Agent Operating Model
+
+The app exposes each agent as an auditable deal-workflow step instead of a generic chat response:
+
+- Coverage banker: resolves target identity, filer status, latest filing context, and mandate gaps.
+- Buyer / acquirer analyst: separates target-side triage from buyer-specific capacity and strategic-fit work.
+- Financial statement analyst: extracts reported XBRL facts and marks unavailable metrics as diligence gaps.
+- Valuation and trading comps analyst: calculates only market-derived outputs and labels suggested peers as approval-required.
+- Capital structure analyst: screens cash, debt, leverage, and financing diligence needs.
+- Risk and disclosure reviewer: escalates filing, disclosure, legal, tax, accounting, regulatory, and diligence limitations.
+- MD synthesis: combines agent outputs and harness gates into a committee-readiness disposition.
+- Product QA Agent: self-tests the application shell, data policy, agent workflow mapping, and deployment harness.
+
 ## Deploy On Render
 
 1. Push this folder to a GitHub repository.

@@ -334,6 +334,12 @@
         id: "private-intake",
         role: "Private deal intake banker",
         mandate: "Convert a non-public target into an auditable acquisition workpaper without pretending public filings exist.",
+        workflowStep: "01. Private intake and material source",
+        usedWhen: "Runs after the private target form is submitted.",
+        inputs: ["target name", "buyer name if provided", "sector description", "source package", "financial period"],
+        output: "Private deal identity, material basis, and confidentiality posture.",
+        decisionUse: "Confirms the case is a private M&A workpaper based on authorized banker/client materials.",
+        controlGate: "Private source package identified",
         status: packet.privateContext.sourceBasis === "Source package not provided" ? "watch" : "green",
         confidence: confidenceFromClient([packet.profile.name, packet.privateContext.sourceBasis, packet.privateContext.period]),
         findings: [
@@ -349,6 +355,12 @@
         id: "private-financials",
         role: "Private financial diligence analyst",
         mandate: "Use only banker/client-provided metrics and expose missing diligence inputs.",
+        workflowStep: "02. Private financial diligence",
+        usedWhen: "Runs after private revenue, EBITDA, cash, and debt fields are parsed.",
+        inputs: ["banker/client revenue", "banker/client EBITDA", "cash", "debt", "financial period"],
+        output: "Provided financial profile, derived net debt, and missing diligence items.",
+        decisionUse: "Shows which private-company metrics can support triage and what needs QoE tie-out.",
+        controlGate: "Revenue and EBITDA provided",
         status: hasValue(m.revenue) && hasValue(m.ebitda) ? "green" : "gap",
         confidence: confidenceFromClient([hasValue(m.revenue), hasValue(m.ebitda), hasValue(m.cash), hasValue(m.debt)]),
         findings: [
@@ -368,6 +380,12 @@
         id: "private-valuation",
         role: "Private valuation guardrail analyst",
         mandate: "Allow valuation discussion only when the banker supplies explicit valuation inputs.",
+        workflowStep: "03. Private valuation guardrail",
+        usedWhen: "Runs after optional enterprise value or purchase price input is checked.",
+        inputs: ["provided enterprise value", "provided revenue", "provided EBITDA"],
+        output: "Provided valuation multiples or a valuation-withheld flag.",
+        decisionUse: "Prevents the memo from inventing price, DCF, LBO, synergy, or control premium conclusions.",
+        controlGate: "Valuation input explicitly provided",
         status: hasValue(m.enterpriseValue) ? "green" : "watch",
         confidence: confidenceFromClient([hasValue(m.enterpriseValue), hasValue(m.revenue), hasValue(m.ebitda)]),
         findings: [
@@ -382,6 +400,12 @@
         id: "private-process",
         role: "Private M&A process advisor",
         mandate: "Translate private-target gaps into acquisition process steps.",
+        workflowStep: "04. Private process and diligence path",
+        usedWhen: "Runs after private intake, financial, and valuation guardrails are complete.",
+        inputs: ["private material basis", "financial gaps", "valuation guardrails", "buyer lens"],
+        output: "Diligence request path and process constraints for a non-public target.",
+        decisionUse: "Frames the next banker actions before using the memo outside internal triage.",
+        controlGate: "Diligence limitations disclosed",
         status: "watch",
         confidence: "Medium",
         findings: [
@@ -579,6 +603,21 @@
             <li>Data gaps are treated as diligence issues, not silently filled.</li>
             <li>Memo output includes agent findings, product self-test status, harness gates, data limitations, and exact source list.</li>
           </ul>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Enterprise workflow</p>
+            <h2>Built around the way IB teams review a live deal</h2>
+          </div>
+        </div>
+        <div class="workflow-rail">
+          <div><strong>01</strong><span>Resolve target and deal parties</span></div>
+          <div><strong>02</strong><span>Load source-backed public or private evidence</span></div>
+          <div><strong>03</strong><span>Run role-based analyst agents over the same packet</span></div>
+          <div><strong>04</strong><span>Surface comps, diligence gaps, and unavailable assumptions</span></div>
+          <div><strong>05</strong><span>Clear harness gates before memo export</span></div>
         </div>
       </section>
       <section class="panel">
@@ -844,20 +883,32 @@
     const r = state.result;
     const agents = r.agents || [];
     const harness = r.harness || { gates: [], score: 0, level: "Unavailable", disposition: "Harness not available." };
+    const gates = harness.gates || [];
+    const blockers = gates.filter((gate) => gate.status !== "pass" && gate.severity !== "advisory");
+    const agentGaps = agents.reduce((sum, agent) => sum + ((agent.gaps || []).length), 0);
+    const sourceCount = r.sources && r.sources.length ? r.sources.length : r.mode === "private" ? 1 : 0;
     return `
       <section class="panel">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Role-Based Memo Orchestration</p>
-            <h2>Analyst agents run on the same sourced data packet</h2>
+            <h2>Agent operating model for the deal packet</h2>
           </div>
           <span class="pill ${harness.readyForExternalUse ? "green" : "amber"}">${escapeHtml(harness.level)} / ${escapeHtml(String(harness.score))}</span>
         </div>
         <div class="notice strong">
-          These are deterministic analyst workstreams, not hidden assumptions. Each role can only use the target packet,
-          banker-supplied peers, SEC facts, filing metadata, quote data, and explicit unavailable flags.
+          Each agent is a bounded workstream tied to a real IB checkpoint. The output is controlled by source provenance,
+          banker/client inputs, unavailable flags, and harness gates.
+        </div>
+        <div class="metric-grid compact-metrics">
+          ${metric("Active workstreams", String(agents.length), "Deal-specific analyst agents running on this packet")}
+          ${metric("Open control gates", String(blockers.length), blockers.length ? "Resolve before broader memo use" : "No non-advisory blocker open")}
+          ${metric("Agent open gaps", String(agentGaps), agentGaps ? "Visible diligence or source gaps" : "No agent gap listed")}
+          ${metric("Evidence records", String(sourceCount), "Source or input provenance attached")}
         </div>
       </section>
+
+      ${agentWorkflowPanel(agents, harness)}
 
       <section class="agent-grid">
         ${agents.map(agentCard).join("")}
@@ -887,15 +938,52 @@
     `;
   }
 
+  function agentWorkflowPanel(agents, harness) {
+    if (!agents.length) {
+      return `<section class="panel"><div class="empty-state">No deal agents are active for this packet.</div></section>`;
+    }
+    return `
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Agent Workflow Map</p>
+            <h2>Where each agent is used in the memo process</h2>
+          </div>
+          <span class="pill ${harness.readyForExternalUse ? "green" : "amber"}">${escapeHtml(harness.disposition || "Readiness pending")}</span>
+        </div>
+        <div class="table-wrap workflow-table">
+          <table>
+            <thead>
+              <tr><th>Step</th><th>Agent</th><th>Used when</th><th>Output</th><th>Control gate</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${agents.map((agent) => `
+                <tr>
+                  <td><strong>${escapeHtml(agent.workflowStep || agent.role)}</strong></td>
+                  <td>${escapeHtml(agent.role)}</td>
+                  <td>${escapeHtml(agent.usedWhen || "Runs when this workstream is available.")}</td>
+                  <td>${escapeHtml(agent.output || agent.mandate || "")}</td>
+                  <td>${escapeHtml(agent.controlGate || "No gate mapped")}</td>
+                  <td><span class="status-chip ${agentStatusClass(agent.status)}">${escapeHtml(agent.status || "watch")}</span></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }
+
   function selfTestPanel() {
     if (!state.selfTest) {
-      return `<div class="empty-state">The QA agent checks product thesis, private-target support, absence of preloaded company shortcuts, static assets, SEC configuration, and harness availability.</div>`;
+      return `<div class="empty-state">The QA agent verifies product thesis, agent workflow mapping, private-target support, absence of preloaded company shortcuts, static assets, SEC configuration, and harness availability.</div>`;
     }
     return `
       <div class="notice strong">
         <strong>${escapeHtml(state.selfTest.agent.role)}:</strong>
         ${escapeHtml(state.selfTest.agent.summary)}
       </div>
+      ${agentMetaPanel(state.selfTest.agent)}
       <div class="table-wrap">
         <table>
           <thead><tr><th>Check</th><th>Status</th><th>Evidence</th></tr></thead>
@@ -927,6 +1015,7 @@
           </div>
           <span class="status-chip ${agentStatusClass(agent.status)}">${escapeHtml(agent.confidence)} confidence</span>
         </div>
+        ${agentMetaPanel(agent)}
         <h3>Findings</h3>
         <ul class="section-list">
           ${(agent.findings || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
@@ -937,6 +1026,26 @@
           ${(agent.nextSteps || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
         </ul>
       </section>
+    `;
+  }
+
+  function agentMetaPanel(agent) {
+    return `
+      <div class="agent-context-grid">
+        <div>
+          <span>Workflow step</span>
+          <strong>${escapeHtml(agent.workflowStep || "Not mapped")}</strong>
+        </div>
+        <div>
+          <span>Decision use</span>
+          <strong>${escapeHtml(agent.decisionUse || "Not mapped")}</strong>
+        </div>
+        <div>
+          <span>Control gate</span>
+          <strong>${escapeHtml(agent.controlGate || "No gate mapped")}</strong>
+        </div>
+      </div>
+      ${agent.inputs && agent.inputs.length ? `<div class="tag-list">${agent.inputs.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
     `;
   }
 
@@ -1206,7 +1315,10 @@
     lines.push("2. Agent Workstream Readout");
     if (r.agents && r.agents.length) {
       r.agents.forEach((agent) => {
-        lines.push(`${agent.role} (${agent.confidence} confidence):`);
+        lines.push(`${agent.workflowStep || "Agent step"} - ${agent.role} (${agent.confidence} confidence):`);
+        if (agent.usedWhen) lines.push(`- Used when: ${agent.usedWhen}`);
+        if (agent.output) lines.push(`- Output: ${agent.output}`);
+        if (agent.controlGate) lines.push(`- Control gate: ${agent.controlGate}`);
         (agent.findings || []).slice(0, 3).forEach((item) => lines.push(`- ${item}`));
         if (agent.gaps && agent.gaps.length) lines.push(`- Open gap: ${agent.gaps[0]}`);
       });
@@ -1278,7 +1390,10 @@
     lines.push("");
     lines.push("3. Agent Workstream Readout");
     (r.agents || []).forEach((agent) => {
-      lines.push(`${agent.role} (${agent.confidence} confidence):`);
+      lines.push(`${agent.workflowStep || "Agent step"} - ${agent.role} (${agent.confidence} confidence):`);
+      if (agent.usedWhen) lines.push(`- Used when: ${agent.usedWhen}`);
+      if (agent.output) lines.push(`- Output: ${agent.output}`);
+      if (agent.controlGate) lines.push(`- Control gate: ${agent.controlGate}`);
       (agent.findings || []).slice(0, 3).forEach((item) => lines.push(`- ${item}`));
       if (agent.gaps && agent.gaps.length) lines.push(`- Open gap: ${agent.gaps[0]}`);
     });
