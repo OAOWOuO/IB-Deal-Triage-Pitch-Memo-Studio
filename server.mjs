@@ -64,6 +64,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/company") {
       const ticker = (url.searchParams.get("ticker") || "").trim();
+      const acquirerInput = (url.searchParams.get("acquirer") || "").trim();
       const peers = (url.searchParams.get("peers") || "")
         .split(",")
         .map((s) => s.trim())
@@ -74,17 +75,48 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const target = await buildCompany(ticker);
+      target.mode = "public";
+      target.acquirer = null;
+      target.deal = {
+        targetRole: "Target / seller",
+        acquirerRole: acquirerInput ? "Acquirer / buyer" : "Not selected",
+        peerUniverseRole: peers.length ? "Banker-approved peer universe" : "System-suggested screen requiring banker approval",
+      };
+      if (acquirerInput) {
+        await delay(130);
+        target.acquirer = await buildCompany(acquirerInput);
+      }
       target.peers = [];
-      for (const peer of peers) {
+      const peerPlan = peers.length
+        ? { mode: "explicit", tickers: peers, methodology: "Banker-entered peer tickers. System resolves and tags each company; banker remains responsible for comp rationale." }
+        : await suggestPeerUniverse(target, target.acquirer);
+      target.peerUniverse = {
+        mode: peerPlan.mode,
+        methodology: peerPlan.methodology,
+        suggestedTickers: peerPlan.tickers,
+        requiresApproval: peerPlan.mode !== "explicit",
+      };
+      for (const peer of peerPlan.tickers.slice(0, 8)) {
         try {
           await delay(130);
-          target.peers.push(await buildCompany(peer));
+          const builtPeer = await buildCompany(peer);
+          builtPeer.peerSelection = {
+            source: peerPlan.mode === "explicit" ? "Banker-approved input" : "System-suggested SEC directory screen",
+            requiresApproval: peerPlan.mode !== "explicit",
+            rationale: peerPlan.mode === "explicit" ? "Entered in the peer universe field." : peerPlan.methodology,
+          };
+          target.peers.push(builtPeer);
         } catch (error) {
           target.peers.push({
             profile: { ticker: peer.toUpperCase(), name: "Unable to resolve" },
             metrics: {},
             quality: { score: 0, level: "Unavailable" },
             quote: null,
+            peerSelection: {
+              source: peerPlan.mode === "explicit" ? "Banker-approved input" : "System-suggested SEC directory screen",
+              requiresApproval: peerPlan.mode !== "explicit",
+              rationale: "Candidate failed to resolve during live-data fetch.",
+            },
             error: error.message,
           });
         }
@@ -227,6 +259,60 @@ async function buildCompany(input) {
     quality,
     sources,
   };
+}
+
+async function suggestPeerUniverse(target, acquirer) {
+  const map = await loadTickerMap();
+  const exclude = new Set([
+    target.profile.ticker,
+    target.profile.cik,
+    acquirer && acquirer.profile && acquirer.profile.ticker,
+    acquirer && acquirer.profile && acquirer.profile.cik,
+  ].filter(Boolean).map((item) => String(item).toUpperCase()));
+  const peerBasis = peerTokens(target.profile);
+  const tokens = peerBasis.tokens;
+  const scored = map
+    .filter((item) => !exclude.has(item.ticker) && !exclude.has(item.cik))
+    .map((item) => {
+      const title = String(item.title || "").toUpperCase();
+      const score = tokens.reduce((sum, token) => sum + (title.includes(token) ? token.length : 0), 0);
+      return { item, score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title))
+    .slice(0, 4)
+    .map((row) => row.item.ticker);
+  const basisLabel = peerBasis.basis === "industry" ? "target SEC industry classification" : "target company name fallback";
+  const methodology = scored.length
+    ? `Auto-suggested from SEC company ticker directory using ${basisLabel} tokens: ${tokens.slice(0, 6).join(", ")}. Requires banker include/exclude approval.`
+    : `No reliable SEC directory peer candidates found from ${basisLabel} tokens: ${tokens.slice(0, 6).join(", ") || "none"}. Add banker-approved peers manually.`;
+  return {
+    mode: scored.length ? "suggested" : "none",
+    tickers: scored,
+    methodology,
+  };
+}
+
+function peerTokens(profile) {
+  const industryTokens = tokenizePeerText(profile.sicDescription || "");
+  if (industryTokens.length) return { basis: "industry", tokens: industryTokens };
+  return { basis: "name", tokens: tokenizePeerText(profile.name || "") };
+}
+
+function tokenizePeerText(text) {
+  const stop = new Set(["INC", "CORP", "CORPORATION", "CO", "COMPANY", "THE", "AND", "OF", "SERVICES", "SERVICE", "HOLDINGS", "HOLDING", "GROUP", "PLC", "LTD", "LLC", "CLASS", "COM", "NEW", "INTERNATIONAL", "BUSINESS"]);
+  const tokens = String(text || "")
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !stop.has(token));
+  const expanded = new Set();
+  for (const token of tokens) {
+    expanded.add(token);
+    if (token.endsWith("IES")) expanded.add(`${token.slice(0, -3)}Y`);
+    if (token.endsWith("S")) expanded.add(token.slice(0, -1));
+  }
+  return Array.from(expanded).slice(0, 12);
 }
 
 async function fetchQuote(ticker) {
@@ -455,6 +541,7 @@ function durationDays(record) {
 }
 
 function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -557,15 +644,18 @@ function collectSources(metrics, filings, quote) {
 }
 
 async function runProductSelfTest() {
-  const [indexHtml, appJs, packageJson, smokeScript] = await Promise.all([
+  const [indexHtml, appJs, packageJson, smokeScript, serverSource] = await Promise.all([
     readTextFile("index.html"),
     readTextFile("app.js"),
     readTextFile("package.json"),
     readTextFile("scripts/smoke.mjs"),
+    readTextFile("server.mjs"),
   ]);
   const checks = [
     qaCheck("Product thesis is explicit", indexHtml.includes("turn a target into a decision-ready acquisition triage memo"), "Homepage states the product is a deal decision memo workflow, not generic research."),
     qaCheck("Private target path exists", indexHtml.includes("privateForm") && appJs.includes("buildPrivateDealPacket"), "Private / confidential targets can be handled from banker/client-provided materials."),
+    qaCheck("Acquirer selection exists", indexHtml.includes("acquirerInput") && appJs.includes("acquirerLabel"), "The workflow distinguishes target from acquirer / buyer."),
+    qaCheck("Suggested peer screen exists", serverSource.includes("suggestPeerUniverse") && indexHtml.includes("Leave blank for a suggested SEC directory screen"), "The app can suggest a preliminary peer universe when banker-approved peers are not entered."),
     qaCheck("No preloaded company shortcut buttons", !indexHtml.includes("data-example") && !appJs.includes("data-example"), "No first-screen company shortcuts or canned comps are wired into the product."),
     qaCheck("No hard-coded company examples in UI", !/(AAPL|JPM|MSFT|NVDA|GOOGL)/.test(indexHtml + appJs), "The UI does not steer users toward a fixed demo company universe."),
     qaCheck("Multi-agent memo tab exists", indexHtml.includes("Agents & Harness") && appJs.includes("agentCard"), "Role-based workstreams are exposed in the app."),
@@ -595,8 +685,11 @@ function qaCheck(label, ok, detail) {
 
 function buildAgentWorkstreams(company) {
   const { profile, metrics, filings, quote } = company;
+  const acquirer = company.acquirer;
   const peers = company.peers || [];
   const validPeers = peers.filter((peer) => peer && !peer.error);
+  const peerMode = company.peerUniverse && company.peerUniverse.mode;
+  const peerLabel = peerMode === "explicit" ? "banker-approved peer set" : peerMode === "suggested" ? "system-suggested peer screen" : "no peer screen";
   const peerEvRevenue = median(validPeers.map((peer) => valueOf(peer.metrics && peer.metrics.evRevenue)));
   const peerEvEbitda = median(validPeers.map((peer) => valueOf(peer.metrics && peer.metrics.evEbitda)));
   const leverage = valueOf(metrics.debt) != null && valueOf(metrics.ebitda) > 0 ? valueOf(metrics.debt) / valueOf(metrics.ebitda) : null;
@@ -611,6 +704,7 @@ function buildAgentWorkstreams(company) {
       confidence: confidenceFrom([profile.cik, latest, quote]),
       findings: [
         `SEC identity resolves to ${profile.name || "unavailable"}${profile.ticker ? ` (${profile.ticker})` : ""} with CIK ${profile.cik || "unavailable"}.`,
+        acquirer ? `Acquirer / buyer lens resolves to ${acquirer.profile.name}${acquirer.profile.ticker ? ` (${acquirer.profile.ticker})` : ""}.` : "No acquirer / buyer has been selected; memo remains target-side triage.",
         latest ? `Most recent screened filing is ${latest.form} filed ${latest.filingDate}.` : "No screened recent SEC filing was available.",
         profile.sicDescription ? `SEC industry classification: ${profile.sicDescription}.` : "SEC industry classification is unavailable."
       ],
@@ -620,6 +714,31 @@ function buildAgentWorkstreams(company) {
       ].filter(Boolean),
       nextSteps: ["Confirm client mandate, transaction objective, confidentiality level, and committee audience before external use."],
       evidence: ["SEC submissions API", latest ? `${latest.form} ${latest.filingDate}` : "No recent filing evidence"]
+    },
+    {
+      id: "buyer-lens",
+      role: "Buyer / acquirer analyst",
+      mandate: "Evaluate whether the memo is target-only or buyer-specific, and screen acquirer capacity when a buyer is supplied.",
+      status: acquirer ? "green" : "watch",
+      confidence: acquirer ? confidenceFrom([acquirer.profile && acquirer.profile.cik, acquirer.metrics && acquirer.metrics.marketCap, acquirer.metrics && acquirer.metrics.cash, acquirer.metrics && acquirer.metrics.debt]) : "Low",
+      findings: acquirer
+        ? [
+            `Buyer: ${acquirer.profile.name}${acquirer.profile.ticker ? ` (${acquirer.profile.ticker})` : ""}.`,
+            `Buyer market cap: ${formatNumber(acquirer.metrics.marketCap)}; cash: ${formatNumber(valueOf(acquirer.metrics.cash))}; debt: ${formatNumber(valueOf(acquirer.metrics.debt))}.`,
+            `Buyer EV / Revenue: ${formatMultiple(valueOf(acquirer.metrics.evRevenue))}; buyer public-data completeness ${acquirer.quality.score}/100.`
+          ]
+        : [
+            "No buyer selected. The memo can still support target-side triage, but strategic fit, financing capacity, synergy logic, and buyer constraints are not assessed."
+          ],
+      gaps: acquirer
+        ? [
+            !hasMetric(acquirer.metrics.cash) && "Buyer cash is unavailable.",
+            !hasMetric(acquirer.metrics.debt) && "Buyer debt is unavailable.",
+            "Synergies, purchase price capacity, financing plan, antitrust, and board approval require banker/client inputs."
+          ].filter(Boolean)
+        : ["Add an acquirer / buyer ticker or document the buyer type if the memo is buyer-side."],
+      nextSteps: [acquirer ? "Add strategic rationale, financing assumptions, and transaction structure if this is a buyer-side memo." : "Select a buyer only if the deal question is buyer-specific; otherwise keep the memo as target-side triage."],
+      evidence: acquirer ? ["SEC submissions API for acquirer", sourceOf(acquirer.metrics.marketCapSource), sourceOf(acquirer.metrics.cash), sourceOf(acquirer.metrics.debt)].filter(Boolean) : ["No acquirer packet"]
     },
     {
       id: "financials",
@@ -649,12 +768,13 @@ function buildAgentWorkstreams(company) {
       findings: [
         `Market cap: ${formatNumber(metrics.marketCap)}; enterprise value: ${formatNumber(valueOf(metrics.enterpriseValue))}.`,
         `EV / Revenue: ${formatMultiple(valueOf(metrics.evRevenue))}; EV / EBITDA: ${formatMultiple(valueOf(metrics.evEbitda))}.`,
-        validPeers.length ? `Banker-supplied peer set contains ${validPeers.length} resolved peer${validPeers.length === 1 ? "" : "s"}; peer median EV/Revenue ${formatMultiple(peerEvRevenue)}, EV/EBITDA ${formatMultiple(peerEvEbitda)}.` : "No banker-supplied peer set was provided."
+        validPeers.length ? `${peerLabel} contains ${validPeers.length} resolved peer${validPeers.length === 1 ? "" : "s"}; peer median EV/Revenue ${formatMultiple(peerEvRevenue)}, EV/EBITDA ${formatMultiple(peerEvEbitda)}.` : "No peer screen was available."
       ],
       gaps: [
         !quote && "Public quote is unavailable, so market-derived valuation is incomplete.",
         !hasMetric(metrics.shares) && "Shares outstanding is unavailable, so market cap cannot be tied to SEC facts.",
-        !validPeers.length && "Relative valuation requires a banker-selected peer set and rationale."
+        !validPeers.length && "Relative valuation requires a peer universe.",
+        peerMode !== "explicit" && "Suggested peer screen requires banker include/exclude approval before use."
       ].filter(Boolean),
       nextSteps: ["Add peer rationale, include/exclude decisions, and outlier treatment before relying on comps."],
       evidence: [quote && quote.source, sourceOf(metrics.enterpriseValue), sourceOf(metrics.evRevenue)].filter(Boolean)
@@ -674,7 +794,7 @@ function buildAgentWorkstreams(company) {
         !hasMetric(metrics.debt) && "Debt tags were incomplete or unavailable.",
         !hasMetric(metrics.ebitda) && "Leverage cannot be calculated without public EBITDA derivation.",
         "Debt maturity schedule, ratings, revolver availability, covenants, and liquidity runway require filing review or company materials."
-      ],
+      ].filter(Boolean),
       nextSteps: ["Review debt footnotes, maturity table, rating agency commentary, and covenant package before financing recommendations."],
       evidence: [sourceOf(metrics.cash), sourceOf(metrics.debt), sourceOf(metrics.ebitda)].filter(Boolean)
     },
@@ -700,11 +820,13 @@ function buildAgentWorkstreams(company) {
       confidence: confidenceFrom([company.quality && company.quality.score >= 80, validPeers.length, hasMetric(metrics.enterpriseValue)]),
       findings: [
         `Public-data completeness is ${company.quality ? `${company.quality.score}/100 (${company.quality.level})` : "not available"}.`,
-        validPeers.length ? "A relative trading discussion can be started, subject to peer rationale and outlier review." : "The memo should remain a target triage note until peers are supplied.",
+        validPeers.length ? `A relative trading discussion can be started from the ${peerLabel}, subject to peer rationale and outlier review.` : "The memo should remain a target triage note until a peer universe is available.",
+        acquirer ? "A buyer-specific memo can begin, but strategic rationale and financing capacity require banker inputs." : "No acquirer is selected; buyer-specific conclusions are withheld.",
         "No DCF, LBO, synergy, buyer appetite, or control-premium conclusions are generated without banker-provided inputs."
       ],
       gaps: [
-        !validPeers.length && "Peer set and rationale missing.",
+        !validPeers.length && "Peer universe missing.",
+        peerMode !== "explicit" && "Peer screen needs banker approval.",
         "Decision request and mandate context must be entered by the banker."
       ].filter(Boolean),
       nextSteps: ["Use the memo as an internal workpaper unless harness gates are cleared and banker context is added."],
@@ -717,9 +839,11 @@ function buildMemoHarness(company) {
   const { profile, metrics, filings, quote, sources } = company;
   const peers = company.peers || [];
   const resolvedPeers = peers.filter((peer) => peer && !peer.error);
+  const peerMode = company.peerUniverse && company.peerUniverse.mode;
   const gates = [
     gate("No preloaded company dataset", true, "critical", "The API requires a user-supplied ticker or CIK and pulls live public sources."),
     gate("SEC identity resolved", Boolean(profile.cik), "critical", profile.cik ? `CIK ${profile.cik}` : "Ticker/CIK could not be resolved."),
+    gate("Acquirer lens selected or intentionally open", true, "advisory", company.acquirer ? `Buyer: ${company.acquirer.profile.name}.` : "No buyer selected; target-side triage only."),
     gate("Source provenance captured", sources && sources.length >= 3, "critical", `${sources ? sources.length : 0} source records attached.`),
     gate("Recent filing metadata available", filings && filings.length > 0, "critical", filings && filings[0] ? `${filings[0].form} filed ${filings[0].filingDate}` : "No recent filing metadata."),
     gate("Public quote available", Boolean(quote && quote.close), "important", quote ? `${quote.source} close ${quote.close} on ${quote.date}` : "Quote unavailable."),
@@ -727,7 +851,8 @@ function buildMemoHarness(company) {
     gate("Enterprise value traceable", hasMetric(metrics.enterpriseValue), "important", "Requires market cap, debt, and cash."),
     gate("Revenue-based valuation traceable", hasMetric(metrics.evRevenue), "important", "Requires EV and reported revenue."),
     gate("EBITDA-based valuation traceable", hasMetric(metrics.evEbitda), "advisory", "Withheld unless public EBITDA can be derived."),
-    gate("Banker-selected peer set supplied", resolvedPeers.length > 0, "important", resolvedPeers.length ? `${resolvedPeers.length} resolved peer${resolvedPeers.length === 1 ? "" : "s"}.` : "No peer set provided."),
+    gate("Peer universe available", resolvedPeers.length > 0, "important", resolvedPeers.length ? `${resolvedPeers.length} resolved peer${resolvedPeers.length === 1 ? "" : "s"} from ${peerMode === "explicit" ? "banker input" : "system suggestion"}.` : "No peer universe available."),
+    gate("Suggested peer screen approved by banker", peerMode === "explicit", "advisory", peerMode === "explicit" ? "Peer universe was banker-entered." : "Suggested peers are preliminary and need banker include/exclude approval."),
     gate("Assumption-based valuation suppressed", true, "critical", "DCF, LBO, synergy, buyer appetite, and control premium are not generated without explicit banker inputs."),
     gate("Memo limitations included", company.limitations && company.limitations.length > 0, "critical", `${company.limitations ? company.limitations.length : 0} limitation statements attached.`)
   ];
@@ -776,7 +901,7 @@ function hasMetric(metric) {
 function valueOf(metric) {
   if (metric == null) return null;
   if (typeof metric === "number") return Number.isFinite(metric) ? metric : null;
-  if (Object.prototype.hasOwnProperty.call(metric, "value")) return numberOrNull(metric.value);
+  if (Object.prototype.hasOwnProperty.call(metric, "value")) return metric.value == null ? null : numberOrNull(metric.value);
   return null;
 }
 

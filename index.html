@@ -32,21 +32,43 @@
           <button type="button" class="active" data-mode="public">Public target</button>
           <button type="button" data-mode="private">Private / confidential target</button>
         </div>
-        <form id="companyForm" class="query-form" data-entry-panel="public">
-          <div class="field ticker-field">
-            <label for="tickerInput">Target ticker or CIK</label>
-            <input id="tickerInput" name="ticker" autocomplete="off" placeholder="Enter a public-company ticker or SEC CIK" />
+        <form id="companyForm" class="deal-form" data-entry-panel="public">
+          <div class="deal-party-grid">
+            <section class="party-card target-party">
+              <p class="eyebrow">Target / seller</p>
+              <h2>Company being evaluated for acquisition</h2>
+              <div class="field ticker-field">
+                <label for="tickerInput">Target ticker or CIK</label>
+                <input id="tickerInput" name="ticker" autocomplete="off" placeholder="Enter target ticker or SEC CIK" />
+              </div>
+            </section>
+            <section class="party-card buyer-party">
+              <p class="eyebrow">Acquirer / buyer</p>
+              <h2>Optional buyer-side lens</h2>
+              <div class="field">
+                <label for="acquirerInput">Acquirer ticker or CIK, optional</label>
+                <input id="acquirerInput" name="acquirer" autocomplete="off" placeholder="Enter buyer ticker or SEC CIK" />
+              </div>
+            </section>
+            <section class="party-card peer-party">
+              <p class="eyebrow">Comparable universe</p>
+              <h2>Suggested first, banker-approved before use</h2>
+              <div class="field peer-field">
+                <label for="peersInput">Banker-approved peer tickers, optional</label>
+                <input id="peersInput" name="peers" autocomplete="off" placeholder="Leave blank for a suggested SEC directory screen" />
+              </div>
+            </section>
           </div>
-          <div class="field peer-field">
-            <label for="peersInput">Peer tickers, optional</label>
-            <input id="peersInput" name="peers" autocomplete="off" placeholder="Comma-separated banker-selected peer tickers" />
-          </div>
-          <button class="primary-button" type="submit">Fetch live data</button>
+          <button class="primary-button" type="submit">Build public deal memo</button>
         </form>
         <form id="privateForm" class="private-form hidden" data-entry-panel="private">
           <div class="field">
             <label for="privateNameInput">Private target name</label>
             <input id="privateNameInput" autocomplete="off" placeholder="Enter target name from banker/client materials" />
+          </div>
+          <div class="field">
+            <label for="privateBuyerInput">Acquirer / buyer name, optional</label>
+            <input id="privateBuyerInput" autocomplete="off" placeholder="Enter buyer, sponsor, or strategic acquirer if known" />
           </div>
           <div class="field">
             <label for="privateSectorInput">Sector / business description</label>
@@ -91,6 +113,10 @@
         <div>
           <span class="strip-label">Target</span>
           <strong id="stripTarget">No company loaded</strong>
+        </div>
+        <div>
+          <span class="strip-label">Acquirer</span>
+          <strong id="stripAcquirer">Not selected</strong>
         </div>
         <div>
           <span class="strip-label">Latest filing</span>

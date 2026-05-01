@@ -1,6 +1,6 @@
 # IB Deal Triage & Pitch Memo Studio
 
-This is a deal decision memo operating system: it turns a public or private acquisition target into an auditable triage memo by separating sourced facts, banker/client-provided inputs, unavailable assumptions, and review gates.
+This is a deal decision memo operating system: it turns a public or private acquisition target into an auditable triage memo by separating target facts, optional acquirer/buyer facts, banker/client-provided inputs, unavailable assumptions, and review gates.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FOAOWOuO%2FIB-Deal-Triage-Pitch-Memo-Studio)
 
@@ -48,6 +48,8 @@ The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when
 - SEC EDGAR submissions API: company identity and recent filing metadata.
 - SEC EDGAR companyfacts API: XBRL-tagged financial facts.
 - Public quote feed: used only to derive market cap and market-based multiples when available.
+- Acquirer / buyer lens: optional public-company buyer packet for buyer-side triage, capacity screens, and deal-party context.
+- Suggested peer screen: when banker-approved peers are not entered, the app can generate a preliminary SEC directory-based peer universe that must be approved before use.
 - Private target mode: uses banker/client-provided materials entered by the user, such as CIM, management accounts, QoE, lender model, board materials, or data room extracts.
 - Multi-agent memo workstreams: role-based deterministic analysis over the same sourced public or banker-provided deal packet.
 - Harness gates: validates source basis, filing availability, quote/valuation traceability, peer explicitness, and assumption suppression.

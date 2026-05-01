@@ -20,6 +20,7 @@
   const form = document.getElementById("companyForm");
   const privateForm = document.getElementById("privateForm");
   const tickerInput = document.getElementById("tickerInput");
+  const acquirerInput = document.getElementById("acquirerInput");
   const peersInput = document.getElementById("peersInput");
   const workspace = document.getElementById("workspace");
   const toast = document.getElementById("toast");
@@ -64,12 +65,14 @@
   function updateStatus() {
     const strip = document.getElementById("statusStrip");
     const target = document.getElementById("stripTarget");
+    const acquirer = document.getElementById("stripAcquirer");
     const filing = document.getElementById("stripFiling");
     const quality = document.getElementById("stripQuality");
     const market = document.getElementById("stripMarket");
     if (!state.result) {
       strip.classList.add("empty");
       target.textContent = "No company loaded";
+      acquirer.textContent = "Not selected";
       filing.textContent = "-";
       quality.textContent = "-";
       market.textContent = "-";
@@ -78,6 +81,7 @@
     const r = state.result;
     strip.classList.remove("empty");
     target.textContent = targetLabel(r);
+    acquirer.textContent = acquirerLabel(r);
     filing.textContent = r.filings && r.filings[0] ? `${r.filings[0].form} filed ${dateFmt(r.filings[0].filingDate)}` : r.mode === "private" ? r.privateContext.period || "Private materials" : "Not available";
     quality.textContent = `${r.quality.score}/100 (${r.quality.level})`;
     market.textContent = r.mode === "private" && r.metrics.marketCap == null ? "Private / not publicly traded" : fmt(r.metrics.marketCap);
@@ -107,14 +111,34 @@
     return `${result.profile.ticker || result.profile.cik} / ${result.profile.name}`;
   }
 
-  async function fetchCompany(ticker, peers) {
+  function acquirerLabel(result) {
+    if (!result) return "Not selected";
+    if (result.mode === "private") return result.privateContext && result.privateContext.buyerName ? result.privateContext.buyerName : "Not selected";
+    return result.acquirer ? `${result.acquirer.profile.ticker || result.acquirer.profile.cik} / ${result.acquirer.profile.name}` : "Not selected";
+  }
+
+  function peerUniverseLabel(result) {
+    if (!result || result.mode === "private") return "Documented in notes";
+    if (!result.peerUniverse) return "Not available";
+    if (result.peerUniverse.mode === "explicit") return "Banker-approved input";
+    if (result.peerUniverse.mode === "suggested") return "Suggested screen";
+    return "Not available";
+  }
+
+  function peerUniverseCaption(result) {
+    if (!result || result.mode === "private") return "Private comps require banker-provided universe or notes.";
+    if (!result.peerUniverse) return "";
+    return result.peerUniverse.methodology || "";
+  }
+
+  async function fetchCompany(ticker, peers, acquirer) {
     state.loading = true;
     state.error = "";
     state.result = null;
     state.selfTest = null;
     updateStatus();
     render();
-    const params = new URLSearchParams({ ticker: ticker.trim(), peers: peers.trim() });
+    const params = new URLSearchParams({ ticker: ticker.trim(), peers: peers.trim(), acquirer: acquirer.trim() });
     try {
       const response = await fetch(`/api/company?${params.toString()}`);
       const payload = await response.json();
@@ -138,6 +162,7 @@
       return null;
     }
     const sector = fieldValue("privateSectorInput") || "Not provided";
+    const buyerName = fieldValue("privateBuyerInput");
     const period = fieldValue("privatePeriodInput") || "Period not provided";
     const sourceBasis = fieldValue("privateSourceInput") || "Source package not provided";
     const source = `Banker/client-provided private materials: ${sourceBasis}; ${period}`;
@@ -187,7 +212,7 @@
       mode: "private",
       fetchedAt: new Date().toISOString(),
       secUserAgentConfigured: false,
-      privateContext: { sector, period, sourceBasis },
+      privateContext: { sector, period, sourceBasis, buyerName },
       profile: {
         cik: "",
         ticker: "",
@@ -203,7 +228,7 @@
       filings: [],
       peers: [],
       risks: buildPrivateRisks(metrics, sourceBasis, period),
-      observations: buildPrivateObservations(name, sector, period, sourceBasis, metrics),
+      observations: buildPrivateObservations(name, buyerName, sector, period, sourceBasis, metrics),
       limitations: buildPrivateLimitations(),
       quality: buildPrivateQuality(metrics, sourceBasis, period),
       sources: [
@@ -264,9 +289,10 @@
     return risks;
   }
 
-  function buildPrivateObservations(name, sector, period, sourceBasis, metrics) {
+  function buildPrivateObservations(name, buyerName, sector, period, sourceBasis, metrics) {
     const observations = [
       `${name} is being treated as a private/confidential acquisition target rather than a public-company SEC filer.`,
+      buyerName ? `Acquirer / buyer lens: ${buyerName}.` : "No acquirer / buyer has been selected; memo remains target-side triage.",
       `Source package: ${sourceBasis}. Financial period: ${period}.`,
       `Business description / sector: ${sector}.`
     ];
@@ -312,6 +338,7 @@
         confidence: confidenceFromClient([packet.profile.name, packet.privateContext.sourceBasis, packet.privateContext.period]),
         findings: [
           `Target: ${packet.profile.name}. Sector / description: ${packet.privateContext.sector}.`,
+          packet.privateContext.buyerName ? `Acquirer / buyer: ${packet.privateContext.buyerName}.` : "No acquirer / buyer has been selected yet.",
           `Source package: ${packet.privateContext.sourceBasis}.`,
           "Private companies can be acquired; the workflow shifts from public-market evidence to authorized private materials and diligence validation."
         ],
@@ -373,6 +400,7 @@
     const gates = [
       clientGate("Private target path selected", true, "critical", "The workflow does not require SEC public-company status."),
       clientGate("Target name provided", Boolean(packet.profile.name), "critical", packet.profile.name || "Missing target name."),
+      clientGate("Acquirer lens documented or intentionally open", true, "advisory", packet.privateContext.buyerName ? `Buyer: ${packet.privateContext.buyerName}` : "Buyer not selected; memo remains target-side triage."),
       clientGate("Source package identified", packet.privateContext.sourceBasis !== "Source package not provided", "critical", packet.privateContext.sourceBasis),
       clientGate("Financial period identified", packet.privateContext.period !== "Period not provided", "critical", packet.privateContext.period),
       clientGate("Revenue provided", hasValue(m.revenue), "important", hasValue(m.revenue) ? fmt(m.revenue.value) : "Missing revenue."),
@@ -426,7 +454,7 @@
       showToast("Enter a ticker or SEC CIK.");
       return;
     }
-    fetchCompany(ticker, peersInput.value);
+    fetchCompany(ticker, peersInput.value, acquirerInput.value);
   });
 
   privateForm.addEventListener("submit", (event) => {
@@ -486,7 +514,7 @@
     if (state.loading) {
       workspace.innerHTML = `
         <section class="panel">
-          <div class="loading">Fetching live SEC filings, XBRL company facts, quote data, and peer metrics...</div>
+          <div class="loading">Fetching target packet, optional acquirer packet, SEC filings, XBRL facts, quote data, and peer universe...</div>
         </section>
       `;
       return;
@@ -591,7 +619,9 @@
         </div>
         <div class="metric-grid">
           ${metric(r.mode === "private" ? "Target type" : "Ticker / Exchange", r.mode === "private" ? "Private / confidential" : `${r.profile.ticker || "Not available"} / ${r.profile.exchange || "Not available"}`, r.mode === "private" ? r.privateContext.sourceBasis : r.profile.cik)}
+          ${metric("Acquirer / buyer", acquirerLabel(r), r.mode === "private" ? "Banker/client-provided buyer lens" : r.acquirer ? "Live public acquirer packet loaded" : "Target-side triage; no buyer selected")}
           ${metric(r.mode === "private" ? "Sector / source basis" : "SEC filer category", r.mode === "private" ? r.profile.sicDescription || "Not provided" : r.profile.category || "Not available", r.mode === "private" ? r.privateContext.period : r.profile.sicDescription || "")}
+          ${metric("Peer universe", peerUniverseLabel(r), peerUniverseCaption(r))}
           ${metric("Latest price", fmt(r.quote && r.quote.close, { type: "price" }), quoteCaption(r.quote))}
           ${metric("Market cap", fmt(m.marketCap), sourceCaption(m.marketCapSource))}
           ${metric("Revenue", fmt(metricValue(m.revenue)), sourceCaption(m.revenue))}
@@ -741,25 +771,30 @@
           <div class="empty-state">
             ${state.result.mode === "private"
               ? "Private target comps are not auto-generated. Add banker-approved public comps in the public target path or document a peer set in banker notes."
-              : "No peer tickers were provided. Add peer tickers in the input bar and fetch again. The app will not invent a peer set because banker-selected comps are a judgment call."}
+              : "No peer screen was available. Add banker-approved tickers or refine the target/acquirer inputs. The app will not invent a final comps set; suggested screens require banker approval."}
           </div>
         </section>
       `;
     }
+    const universe = state.result.peerUniverse || {};
     return `
       <section class="panel">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">User-Specified Peer Set</p>
-            <h2>Trading Comparison</h2>
+            <p class="eyebrow">${universe.mode === "explicit" ? "Banker-Approved Peer Set" : "Suggested Peer Screen"}</p>
+            <h2>${universe.mode === "explicit" ? "Trading Comparison" : "Preliminary universe requiring approval"}</h2>
           </div>
-          <span class="pill">${peers.length} live peers</span>
+          <span class="pill ${universe.mode === "explicit" ? "green" : "amber"}">${peers.length} live peer${peers.length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="notice strong">
+          ${escapeHtml(universe.methodology || "Peer methodology not available.")}
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Company</th>
+                <th>Selection basis</th>
                 <th>Price date</th>
                 <th>Market cap</th>
                 <th>EV / Revenue</th>
@@ -1079,6 +1114,7 @@
     return `
       <tr>
         <td><strong>${escapeHtml(company.profile.ticker || company.profile.cik)}</strong><br>${escapeHtml(company.profile.name)}</td>
+        <td>${escapeHtml(company.peerSelection ? `${company.peerSelection.source}${company.peerSelection.requiresApproval ? " / approval needed" : ""}` : "Target company")}</td>
         <td>${escapeHtml(company.quote ? `${company.quote.date} ${company.quote.time || ""}` : "Not available")}</td>
         <td>${escapeHtml(fmt(company.metrics.marketCap))}</td>
         <td>${escapeHtml(fmt(metricValue(company.metrics.evRevenue), { type: "multiple" }))}</td>
@@ -1165,6 +1201,7 @@
     lines.push("1. Source Basis");
     lines.push(`This memo uses public SEC EDGAR filings/XBRL company facts and public market quote data only. No fabricated company data, banker assumptions, DCF, LBO, synergy, or control premium inputs are included.`);
     lines.push(`SEC CIK: ${r.profile.cik}. Latest filing shown: ${r.filings[0] ? `${r.filings[0].form} filed ${r.filings[0].filingDate}` : "not available"}.`);
+    lines.push(`Deal parties: target / seller is ${r.profile.name}; acquirer / buyer is ${r.acquirer ? r.acquirer.profile.name : "not selected"}.`);
     lines.push("");
     lines.push("2. Agent Workstream Readout");
     if (r.agents && r.agents.length) {
@@ -1203,11 +1240,13 @@
     lines.push("");
     lines.push("8. Peer Set");
     if (r.peers && r.peers.length) {
+      lines.push(`Peer universe basis: ${peerUniverseLabel(r)}. ${peerUniverseCaption(r)}`);
       r.peers.forEach((peer) => {
-        lines.push(`- ${peer.profile.ticker || peer.profile.cik} / ${peer.profile.name}: market cap ${fmt(peer.metrics.marketCap)}, EV/Revenue ${fmt(metricValue(peer.metrics.evRevenue), { type: "multiple" })}, data quality ${peer.quality.score}/100.`);
+        const selection = peer.peerSelection ? `${peer.peerSelection.source}${peer.peerSelection.requiresApproval ? "; banker approval required" : ""}` : "Target";
+        lines.push(`- ${peer.profile.ticker || peer.profile.cik} / ${peer.profile.name}: market cap ${fmt(peer.metrics.marketCap)}, EV/Revenue ${fmt(metricValue(peer.metrics.evRevenue), { type: "multiple" })}, data quality ${peer.quality.score}/100. Selection: ${selection}.`);
       });
     } else {
-      lines.push("- No peer tickers were supplied. A banker-selected peer set is required before using this for relative valuation discussion.");
+      lines.push("- No peer universe was available. A banker-approved peer set is required before using this for relative valuation discussion.");
     }
     lines.push("");
     lines.push("9. Banker-Provided Context");
@@ -1231,6 +1270,7 @@
     lines.push("1. Product Purpose");
     lines.push("This memo turns a non-public acquisition target into a decision-ready triage workpaper by separating banker/client-provided facts, unavailable assumptions, diligence gaps, and review gates.");
     lines.push("A target does not need to be public to be acquired. For private targets, the evidence base shifts to authorized private materials and diligence validation.");
+    lines.push(`Deal parties: target / seller is ${r.profile.name}; acquirer / buyer is ${r.privateContext.buyerName || "not selected"}.`);
     lines.push("");
     lines.push("2. Source Basis");
     lines.push(`Source package: ${r.privateContext.sourceBasis}. Financial period: ${r.privateContext.period}.`);

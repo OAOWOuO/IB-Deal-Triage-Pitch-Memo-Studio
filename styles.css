@@ -203,11 +203,42 @@ h3 {
   color: #fff;
 }
 
-.query-form {
+.deal-form {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+}
+
+.deal-party-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
   gap: 10px;
-  align-items: end;
+}
+
+.party-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 150px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcf8;
+}
+
+.party-card h2 {
+  line-height: 1.25;
+}
+
+.target-party {
+  border-color: rgba(12, 98, 87, 0.35);
+}
+
+.buyer-party {
+  border-color: rgba(49, 91, 130, 0.35);
+}
+
+.peer-party {
+  border-color: rgba(145, 95, 13, 0.35);
 }
 
 .private-form {
@@ -295,7 +326,7 @@ h3 {
 
 .status-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -617,7 +648,7 @@ td {
 }
 
 @media (max-width: 1080px) {
-  .query-form,
+  .deal-party-grid,
   .private-form,
   .status-strip,
   .grid-4,
@@ -637,7 +668,7 @@ td {
     align-items: flex-start;
   }
 
-  .query-form,
+  .deal-party-grid,
   .private-form,
   .status-strip,
   .grid-2,
