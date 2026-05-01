@@ -12,4 +12,4 @@ services:
       - key: NODE_VERSION
         value: 22.16.0
       - key: SEC_USER_AGENT
-        sync: false
+        value: "IB Deal Triage Pitch Memo Studio/1.0 (https://github.com/OAOWOuO/IB-Deal-Triage-Pitch-Memo-Studio; contact=OAOWOuO)"

@@ -7,7 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
 const IS_DEPLOYED = process.env.RENDER === "true" || process.env.NODE_ENV === "production";
 const HOST = process.env.HOST || (IS_DEPLOYED ? "0.0.0.0" : "127.0.0.1");
-const SEC_USER_AGENT = process.env.SEC_USER_AGENT || "IBDealStudio/1.0 local-research@example.com";
+const DEFAULT_SEC_USER_AGENT = "IB Deal Triage Pitch Memo Studio/1.0 (https://github.com/OAOWOuO/IB-Deal-Triage-Pitch-Memo-Studio; contact=OAOWOuO)";
+const SEC_USER_AGENT = (process.env.SEC_USER_AGENT || DEFAULT_SEC_USER_AGENT).trim();
+const SEC_USER_AGENT_SOURCE = process.env.SEC_USER_AGENT ? "environment" : "built-in fallback";
 const SEC_TICKERS_URL = process.env.SEC_TICKERS_URL || "https://www.sec.gov/files/company_tickers.json";
 const CACHE_DIR = path.join(__dirname, ".cache");
 const TICKER_CACHE_FILE = path.join(CACHE_DIR, "sec-company-tickers.json");
@@ -83,7 +85,12 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === "/api/health") {
-      sendJson(res, 200, { ok: true, secUserAgentConfigured: Boolean(process.env.SEC_USER_AGENT) });
+      sendJson(res, 200, {
+        ok: true,
+        secUserAgentActive: Boolean(SEC_USER_AGENT),
+        secUserAgentConfigured: Boolean(process.env.SEC_USER_AGENT),
+        secUserAgentSource: SEC_USER_AGENT_SOURCE,
+      });
       return;
     }
     if (url.pathname === "/api/self-test") {
@@ -171,7 +178,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`IB Deal Studio live-data server running at http://${HOST}:${PORT}`);
-  console.log(`SEC User-Agent: ${SEC_USER_AGENT}`);
+  console.log(`SEC User-Agent source: ${SEC_USER_AGENT_SOURCE}`);
 });
 
 async function serveStatic(requestPath, res) {
@@ -383,7 +390,8 @@ async function buildCompany(input) {
   const quality = buildQuality(metrics, filings, quote);
   return {
     fetchedAt: new Date().toISOString(),
-    secUserAgentConfigured: Boolean(process.env.SEC_USER_AGENT),
+    secUserAgentConfigured: Boolean(SEC_USER_AGENT),
+    secUserAgentSource: SEC_USER_AGENT_SOURCE,
     profile,
     quote,
     metrics,
@@ -782,12 +790,13 @@ function collectSources(profile, metrics, filings, quote) {
 }
 
 async function runProductSelfTest() {
-  const [indexHtml, appJs, packageJson, smokeScript, serverSource] = await Promise.all([
+  const [indexHtml, appJs, packageJson, smokeScript, serverSource, renderYaml] = await Promise.all([
     readTextFile("index.html"),
     readTextFile("app.js"),
     readTextFile("package.json"),
     readTextFile("scripts/smoke.mjs"),
     readTextFile("server.mjs"),
+    readTextFile("render.yaml"),
   ]);
   const checks = [
     qaCheck("Product thesis is explicit", indexHtml.includes("turn a target into a decision-ready acquisition triage memo"), "Homepage states the product is a deal decision memo workflow, not generic research."),
@@ -804,7 +813,8 @@ async function runProductSelfTest() {
     qaCheck("Multi-agent memo tab exists", indexHtml.includes("Agents & Harness") && appJs.includes("agentCard"), "Role-based workstreams are exposed in the app."),
     qaCheck("Product QA agent endpoint exists", appJs.includes("/api/self-test"), "The frontend can trigger this self-test endpoint."),
     qaCheck("Harness script is available", smokeScript.includes("HARNESS_TICKER") && packageJson.includes("\"harness\""), "Deployment smoke/data-quality harness is present and configurable."),
-    qaCheck("SEC user agent configured", Boolean(process.env.SEC_USER_AGENT), process.env.SEC_USER_AGENT ? "SEC_USER_AGENT is configured." : "SEC_USER_AGENT is not configured."),
+    qaCheck("SEC user agent active", Boolean(SEC_USER_AGENT), `SEC requests include a declared User-Agent from ${SEC_USER_AGENT_SOURCE}.`),
+    qaCheck("Render SEC identity declared", renderYaml.includes("SEC_USER_AGENT") && renderYaml.includes("IB Deal Triage Pitch Memo Studio/1.0"), "render.yaml declares the SEC User-Agent so Render can deploy with an explicit identity."),
   ];
   const ok = checks.every((check) => check.status === "pass");
   return {

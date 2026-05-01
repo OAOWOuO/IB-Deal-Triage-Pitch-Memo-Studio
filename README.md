@@ -63,8 +63,10 @@ When public quote data or source metrics are unavailable, users can enter explic
    - Build command: `npm install`
    - Start command: `npm start`
    - Health check path: `/api/health`
-4. Add an environment variable:
-   - `SEC_USER_AGENT=Your Name your.email@example.com`
+4. `render.yaml` declares a production-safe SEC User-Agent for the deployed service:
+   - `SEC_USER_AGENT=IB Deal Triage Pitch Memo Studio/1.0 (https://github.com/OAOWOuO/IB-Deal-Triage-Pitch-Memo-Studio; contact=OAOWOuO)`
+
+To override it with a personal or company contact in Render, open the service, go to **Environment**, add or edit `SEC_USER_AGENT`, and redeploy. SEC asks automated clients to declare a User-Agent with contact information so EDGAR can preserve fair access and identify excessive traffic.
 
 The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when deployed. Locally, it binds to `127.0.0.1` and opens at `http://127.0.0.1:4173`.
 
