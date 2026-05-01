@@ -36,6 +36,7 @@ const fallbackTickerMap = [
   ["MA", "0001141391", "Mastercard Incorporated"],
   ["AXP", "0000004962", "American Express Company"],
   ["PYPL", "0001633917", "PayPal Holdings, Inc."],
+  ["MDGL", "0001157601", "Madrigal Pharmaceuticals, Inc."],
   ["BRK-B", "0001067983", "Berkshire Hathaway Inc."],
   ["UNH", "0000731766", "UnitedHealth Group Incorporated"],
   ["JNJ", "0000200406", "Johnson & Johnson"],
