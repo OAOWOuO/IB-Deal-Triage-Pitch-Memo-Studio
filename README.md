@@ -70,6 +70,8 @@ To override it with a personal or company contact in Render, open the service, g
 
 The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when deployed. Locally, it binds to `127.0.0.1` and opens at `http://127.0.0.1:4173`.
 
+The production Render service is connected to the `main` branch with Auto-Deploy set to `On Commit`.
+
 ## Data Policy
 
 - SEC EDGAR submissions API: company identity and recent filing metadata.
