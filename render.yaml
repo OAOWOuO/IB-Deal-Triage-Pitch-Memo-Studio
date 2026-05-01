@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: ib-live-deal-studio
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: SEC_USER_AGENT
+        sync: false

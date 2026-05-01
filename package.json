@@ -1,0 +1,14 @@
+{
+  "name": "ib-live-deal-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Live public-company investment banking deal triage and pitch memo studio.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check app.js"
+  }
+}

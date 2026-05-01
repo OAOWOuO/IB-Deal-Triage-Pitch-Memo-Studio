@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IB Live Deal Intelligence Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">IB</div>
+          <div>
+            <p class="eyebrow">Live Public-Company Deal Intelligence</p>
+            <h1>IB Deal Triage & Pitch Memo Studio</h1>
+          </div>
+        </div>
+        <div class="source-badges">
+          <a href="https://www.sec.gov/edgar/sec-api-documentation" target="_blank" rel="noopener noreferrer">SEC EDGAR APIs</a>
+          <span>Public market quote feed</span>
+        </div>
+      </header>
+
+      <section class="query-panel" aria-label="Live data request">
+        <form id="companyForm" class="query-form">
+          <div class="field ticker-field">
+            <label for="tickerInput">Target ticker or CIK</label>
+            <input id="tickerInput" name="ticker" autocomplete="off" placeholder="AAPL, JPM, MSFT, 0000320193" />
+          </div>
+          <div class="field peer-field">
+            <label for="peersInput">Peer tickers, optional</label>
+            <input id="peersInput" name="peers" autocomplete="off" placeholder="MSFT,NVDA,GOOGL" />
+          </div>
+          <button class="primary-button" type="submit">Fetch live data</button>
+        </form>
+        <div class="example-row" aria-label="Real company shortcuts">
+          <span>Real company examples:</span>
+          <button type="button" data-example="AAPL" data-peers="MSFT,NVDA,GOOGL">AAPL</button>
+          <button type="button" data-example="JPM" data-peers="BAC,WFC,C">JPM</button>
+          <button type="button" data-example="V" data-peers="MA,AXP,PYPL">V</button>
+        </div>
+      </section>
+
+      <section id="statusStrip" class="status-strip empty" aria-label="Live data status">
+        <div>
+          <span class="strip-label">Target</span>
+          <strong id="stripTarget">No company loaded</strong>
+        </div>
+        <div>
+          <span class="strip-label">Latest filing</span>
+          <strong id="stripFiling">-</strong>
+        </div>
+        <div>
+          <span class="strip-label">Data quality</span>
+          <strong id="stripQuality">-</strong>
+        </div>
+        <div>
+          <span class="strip-label">Market value</span>
+          <strong id="stripMarket">-</strong>
+        </div>
+      </section>
+
+      <nav class="tabbar" aria-label="Primary workflow">
+        <button type="button" class="tab active" data-tab="overview">Overview</button>
+        <button type="button" class="tab" data-tab="financials">Financials</button>
+        <button type="button" class="tab" data-tab="valuation">Market & Valuation</button>
+        <button type="button" class="tab" data-tab="peers">Peers</button>
+        <button type="button" class="tab" data-tab="risks">Filings & Risks</button>
+        <button type="button" class="tab" data-tab="memo">Memo</button>
+        <button type="button" class="tab" data-tab="controls">Controls</button>
+      </nav>
+
+      <main id="workspace" class="workspace" aria-live="polite"></main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>
