@@ -43,6 +43,10 @@ The app exposes each agent as an auditable deal-workflow step instead of a gener
 - MD synthesis: combines agent outputs and harness gates into a committee-readiness disposition.
 - Product QA Agent: self-tests the application shell, data policy, agent workflow mapping, and deployment harness.
 
+## Committee Pack Builder
+
+The Committee Pack tab turns the same controlled deal packet into an MD / IC review agenda with executive readout, deal parties, financial profile, valuation and comps status, risk and diligence requests, source appendix, distribution controls, and copy/download actions.
+
 ## Deploy On Render
 
 1. Push this folder to a GitHub repository.
