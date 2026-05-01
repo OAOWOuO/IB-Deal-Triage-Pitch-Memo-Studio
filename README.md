@@ -2,6 +2,8 @@
 
 This is now a live public-company workbench instead of a fabricated-data prototype.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FOAOWOuO%2FIB-Deal-Triage-Pitch-Memo-Studio)
+
 ## Run
 
 ```bash
@@ -26,7 +28,7 @@ http://127.0.0.1:4173
 4. Add an environment variable:
    - `SEC_USER_AGENT=Your Name your.email@example.com`
 
-The server binds to `0.0.0.0` automatically on Render and `127.0.0.1` locally.
+The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when deployed. Locally, it binds to `127.0.0.1` and opens at `http://127.0.0.1:4173`.
 
 ## Data Policy
 

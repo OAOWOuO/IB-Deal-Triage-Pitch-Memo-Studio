@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
-const HOST = process.env.HOST || (process.env.RENDER ? "0.0.0.0" : "127.0.0.1");
+const IS_DEPLOYED = process.env.RENDER === "true" || process.env.NODE_ENV === "production";
+const HOST = process.env.HOST || (IS_DEPLOYED ? "0.0.0.0" : "127.0.0.1");
 const SEC_USER_AGENT = process.env.SEC_USER_AGENT || "IBDealStudio/1.0 local-research@example.com";
 const CACHE_MS = 1000 * 60 * 15;
 const cache = new Map();
