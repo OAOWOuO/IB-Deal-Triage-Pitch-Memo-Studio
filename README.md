@@ -1,6 +1,6 @@
 # IB Deal Triage & Pitch Memo Studio
 
-This is now a live public-company workbench instead of a fabricated-data prototype.
+This is a deal decision memo operating system: it turns a public or private acquisition target into an auditable triage memo by separating sourced facts, banker/client-provided inputs, unavailable assumptions, and review gates.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FOAOWOuO%2FIB-Deal-Triage-Pitch-Memo-Studio)
 
@@ -24,7 +24,7 @@ npm run check
 npm run harness
 ```
 
-By default, the harness checks the server health endpoint, static assets, and controlled API validation without using a fixed company fixture. To exercise the live SEC and quote pipeline with a banker-selected target:
+By default, the harness checks the server health endpoint, static assets, the Product QA Agent endpoint, and controlled API validation without using a fixed company fixture. To exercise the live SEC and quote pipeline with a banker-selected target:
 
 ```bash
 HARNESS_TICKER="YOUR_TICKER" HARNESS_PEERS="PEER1,PEER2" npm run harness
@@ -48,8 +48,10 @@ The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when
 - SEC EDGAR submissions API: company identity and recent filing metadata.
 - SEC EDGAR companyfacts API: XBRL-tagged financial facts.
 - Public quote feed: used only to derive market cap and market-based multiples when available.
-- Multi-agent memo workstreams: role-based deterministic analysis over the same sourced public-data packet.
+- Private target mode: uses banker/client-provided materials entered by the user, such as CIM, management accounts, QoE, lender model, board materials, or data room extracts.
+- Multi-agent memo workstreams: role-based deterministic analysis over the same sourced public or banker-provided deal packet.
 - Harness gates: validates source basis, filing availability, quote/valuation traceability, peer explicitness, and assumption suppression.
+- Product QA Agent: `/api/self-test` checks product thesis, private-target support, absence of company shortcuts, harness availability, and SEC configuration.
 - No fabricated company data, preloaded company shortcuts, preset comps, DCF model inputs, LBO model inputs, control premiums, or invented buyer lists.
 - Missing public data is shown as unavailable and becomes a diligence/control gap.
 

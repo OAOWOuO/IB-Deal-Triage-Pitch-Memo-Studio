@@ -12,18 +12,27 @@
         <div class="brand-block">
           <div class="brand-mark" aria-hidden="true">IB</div>
           <div>
-            <p class="eyebrow">Live Public-Company Deal Intelligence</p>
+            <p class="eyebrow">Deal Decision Memo Operating System</p>
             <h1>IB Deal Triage & Pitch Memo Studio</h1>
           </div>
         </div>
         <div class="source-badges">
           <a href="https://www.sec.gov/edgar/sec-api-documentation" target="_blank" rel="noopener noreferrer">SEC EDGAR APIs</a>
-          <span>Public market quote feed</span>
+          <span>Private materials mode</span>
+          <span>Self-test agent</span>
         </div>
       </header>
 
       <section class="query-panel" aria-label="Live data request">
-        <form id="companyForm" class="query-form">
+        <div class="product-thesis">
+          <strong>Purpose:</strong> turn a target into a decision-ready acquisition triage memo by separating sourced facts,
+          banker/client-provided inputs, unavailable assumptions, and review gates.
+        </div>
+        <div class="mode-switch" aria-label="Target type">
+          <button type="button" class="active" data-mode="public">Public target</button>
+          <button type="button" data-mode="private">Private / confidential target</button>
+        </div>
+        <form id="companyForm" class="query-form" data-entry-panel="public">
           <div class="field ticker-field">
             <label for="tickerInput">Target ticker or CIK</label>
             <input id="tickerInput" name="ticker" autocomplete="off" placeholder="Enter a public-company ticker or SEC CIK" />
@@ -34,8 +43,47 @@
           </div>
           <button class="primary-button" type="submit">Fetch live data</button>
         </form>
+        <form id="privateForm" class="private-form hidden" data-entry-panel="private">
+          <div class="field">
+            <label for="privateNameInput">Private target name</label>
+            <input id="privateNameInput" autocomplete="off" placeholder="Enter target name from banker/client materials" />
+          </div>
+          <div class="field">
+            <label for="privateSectorInput">Sector / business description</label>
+            <input id="privateSectorInput" autocomplete="off" placeholder="Enter sector or business description" />
+          </div>
+          <div class="field">
+            <label for="privatePeriodInput">Financial period</label>
+            <input id="privatePeriodInput" autocomplete="off" placeholder="Enter period, e.g. FY2025 or LTM Sep-2025" />
+          </div>
+          <div class="field">
+            <label for="privateSourceInput">Source package</label>
+            <input id="privateSourceInput" autocomplete="off" placeholder="CIM, management accounts, QoE, lender model, or data room extract" />
+          </div>
+          <div class="field">
+            <label for="privateRevenueInput">Revenue</label>
+            <input id="privateRevenueInput" inputmode="decimal" autocomplete="off" placeholder="Banker/client-provided amount" />
+          </div>
+          <div class="field">
+            <label for="privateEbitdaInput">EBITDA</label>
+            <input id="privateEbitdaInput" inputmode="decimal" autocomplete="off" placeholder="Banker/client-provided amount" />
+          </div>
+          <div class="field">
+            <label for="privateCashInput">Cash</label>
+            <input id="privateCashInput" inputmode="decimal" autocomplete="off" placeholder="Banker/client-provided amount" />
+          </div>
+          <div class="field">
+            <label for="privateDebtInput">Debt</label>
+            <input id="privateDebtInput" inputmode="decimal" autocomplete="off" placeholder="Banker/client-provided amount" />
+          </div>
+          <div class="field">
+            <label for="privateEvInput">Provided enterprise value, optional</label>
+            <input id="privateEvInput" inputmode="decimal" autocomplete="off" placeholder="Only if explicitly supplied in materials" />
+          </div>
+          <button class="primary-button" type="submit">Build private-deal memo</button>
+        </form>
         <div class="workflow-note" aria-label="Research discipline">
-          No preloaded companies or canned comps. Target and peer universe must be entered by the banker so the workpaper has an auditable deal context.
+          Public companies use SEC and quote data. Private targets use banker/client-provided materials processed in the browser, with gaps marked as diligence items.
         </div>
       </section>
 

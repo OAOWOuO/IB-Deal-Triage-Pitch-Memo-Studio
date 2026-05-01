@@ -86,6 +86,13 @@ try {
     assert(css.response.ok && css.contentType.includes("text/css"), "styles.css did not return CSS");
   });
 
+  await check("product self-test agent", async () => {
+    const { response, body } = await request("/api/self-test");
+    assert(response.ok, "self-test endpoint did not return 200");
+    assert(body.agent && body.agent.role === "Product QA Agent", "self-test agent identity missing");
+    assert(Array.isArray(body.checks) && body.checks.length >= 5, "self-test checks missing");
+  });
+
   await check("missing ticker validation", async () => {
     const { response, body } = await request("/api/company?ticker=");
     assert(response.status === 400, "missing ticker should return 400");

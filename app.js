@@ -2,10 +2,12 @@
   "use strict";
 
   const state = {
+    entryMode: "public",
     activeTab: "overview",
     loading: false,
     error: "",
     result: null,
+    selfTest: null,
     notes: {
       mandate: "",
       decision: "",
@@ -16,6 +18,7 @@
   const tabs = ["overview", "financials", "valuation", "peers", "risks", "agents", "memo", "controls"];
 
   const form = document.getElementById("companyForm");
+  const privateForm = document.getElementById("privateForm");
   const tickerInput = document.getElementById("tickerInput");
   const peersInput = document.getElementById("peersInput");
   const workspace = document.getElementById("workspace");
@@ -74,10 +77,10 @@
     }
     const r = state.result;
     strip.classList.remove("empty");
-    target.textContent = `${r.profile.ticker || r.profile.cik} / ${r.profile.name}`;
-    filing.textContent = r.filings && r.filings[0] ? `${r.filings[0].form} filed ${dateFmt(r.filings[0].filingDate)}` : "Not available";
+    target.textContent = targetLabel(r);
+    filing.textContent = r.filings && r.filings[0] ? `${r.filings[0].form} filed ${dateFmt(r.filings[0].filingDate)}` : r.mode === "private" ? r.privateContext.period || "Private materials" : "Not available";
     quality.textContent = `${r.quality.score}/100 (${r.quality.level})`;
-    market.textContent = fmt(r.metrics.marketCap);
+    market.textContent = r.mode === "private" && r.metrics.marketCap == null ? "Private / not publicly traded" : fmt(r.metrics.marketCap);
   }
 
   function setActiveTab(tab) {
@@ -88,10 +91,27 @@
     render();
   }
 
+  function setEntryMode(mode) {
+    state.entryMode = mode === "private" ? "private" : "public";
+    document.querySelectorAll("[data-mode]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === state.entryMode);
+    });
+    document.querySelectorAll("[data-entry-panel]").forEach((panel) => {
+      panel.classList.toggle("hidden", panel.dataset.entryPanel !== state.entryMode);
+    });
+  }
+
+  function targetLabel(result) {
+    if (!result) return "No company loaded";
+    if (result.mode === "private") return `Private / ${result.profile.name}`;
+    return `${result.profile.ticker || result.profile.cik} / ${result.profile.name}`;
+  }
+
   async function fetchCompany(ticker, peers) {
     state.loading = true;
     state.error = "";
     state.result = null;
+    state.selfTest = null;
     updateStatus();
     render();
     const params = new URLSearchParams({ ticker: ticker.trim(), peers: peers.trim() });
@@ -111,6 +131,294 @@
     }
   }
 
+  function buildPrivateDealPacket() {
+    const name = fieldValue("privateNameInput");
+    if (!name) {
+      showToast("Enter the private target name.");
+      return null;
+    }
+    const sector = fieldValue("privateSectorInput") || "Not provided";
+    const period = fieldValue("privatePeriodInput") || "Period not provided";
+    const sourceBasis = fieldValue("privateSourceInput") || "Source package not provided";
+    const source = `Banker/client-provided private materials: ${sourceBasis}; ${period}`;
+    const revenue = privateMetric(fieldNumber("privateRevenueInput"), "Revenue", source, period);
+    const ebitda = privateMetric(fieldNumber("privateEbitdaInput"), "EBITDA", source, period);
+    const cash = privateMetric(fieldNumber("privateCashInput"), "Cash", source, period);
+    const debt = privateMetric(fieldNumber("privateDebtInput"), "Debt", source, period);
+    const providedEv = privateMetric(fieldNumber("privateEvInput"), "Provided enterprise value", source, period);
+    const netDebt = debt.value != null || cash.value != null
+      ? derivedPrivateMetric((debt.value || 0) - (cash.value || 0), "Net debt derived from banker/client-provided debt minus cash", [debt, cash], period)
+      : privateMetric(null, "Net debt", "Requires banker/client-provided debt and cash", period);
+    const evRevenue = ratioMetric(providedEv, revenue, "Provided EV / Revenue", (a, b) => a / b, period);
+    const evEbitda = ratioMetric(providedEv, ebitda, "Provided EV / EBITDA", (a, b) => a / b, period);
+    const ebitdaMargin = ratioMetric(ebitda, revenue, "EBITDA margin", (a, b) => (a / b) * 100, period);
+    const metrics = {
+      revenue,
+      priorRevenue: privateMetric(null, "Prior revenue", "Requires additional banker/client-provided period", period),
+      revenueGrowth: privateMetric(null, "Revenue growth", "Requires two banker/client-provided periods", period),
+      grossProfit: privateMetric(null, "Gross profit", "Requires banker/client-provided gross profit", period),
+      grossMargin: privateMetric(null, "Gross margin", "Requires banker/client-provided gross profit and revenue", period),
+      operatingIncome: privateMetric(null, "Operating income", "Requires banker/client-provided operating income", period),
+      operatingMargin: privateMetric(null, "Operating margin", "Requires banker/client-provided operating income and revenue", period),
+      netIncome: privateMetric(null, "Net income", "Requires banker/client-provided net income", period),
+      assets: privateMetric(null, "Assets", "Requires banker/client-provided balance sheet", period),
+      cash,
+      debt,
+      equity: privateMetric(null, "Equity", "Requires banker/client-provided balance sheet", period),
+      operatingCashFlow: privateMetric(null, "Operating cash flow", "Requires banker/client-provided cash flow statement", period),
+      capex: privateMetric(null, "Capital expenditure", "Requires banker/client-provided capex", period),
+      freeCashFlow: privateMetric(null, "Free cash flow", "Requires banker/client-provided CFO and capex", period),
+      freeCashFlowMargin: privateMetric(null, "Free cash flow margin", "Requires banker/client-provided free cash flow and revenue", period),
+      da: privateMetric(null, "Depreciation and amortization", "Requires banker/client-provided D&A", period),
+      ebitda,
+      ebitdaMargin,
+      shares: privateMetric(null, "Shares", "Private target has no public share count unless provided in capitalization materials", period),
+      eps: privateMetric(null, "EPS", "Not applicable without provided capitalization and earnings data", period),
+      marketCap: null,
+      marketCapSource: "Private target is not publicly traded.",
+      enterpriseValue: providedEv,
+      evRevenue,
+      evEbitda,
+      priceEarnings: privateMetric(null, "P / E", "Requires provided equity value and net income", period),
+      priceBook: privateMetric(null, "P / Book", "Requires provided equity value and book equity", period),
+      netDebt
+    };
+    const packet = {
+      mode: "private",
+      fetchedAt: new Date().toISOString(),
+      secUserAgentConfigured: false,
+      privateContext: { sector, period, sourceBasis },
+      profile: {
+        cik: "",
+        ticker: "",
+        name,
+        exchange: "Private",
+        sicDescription: sector,
+        category: "Private / non-SEC public filer",
+        fiscalYearEnd: period,
+        location: ""
+      },
+      quote: null,
+      metrics,
+      filings: [],
+      peers: [],
+      risks: buildPrivateRisks(metrics, sourceBasis, period),
+      observations: buildPrivateObservations(name, sector, period, sourceBasis, metrics),
+      limitations: buildPrivateLimitations(),
+      quality: buildPrivateQuality(metrics, sourceBasis, period),
+      sources: [
+        source,
+        "Private target workflow: no SEC public-company filing or public quote is assumed.",
+        "All populated private-company metrics are banker/client-provided and require diligence tie-out."
+      ]
+    };
+    packet.agents = buildPrivateAgents(packet);
+    packet.harness = buildPrivateHarness(packet);
+    return packet;
+  }
+
+  function fieldValue(id) {
+    const node = document.getElementById(id);
+    return node ? node.value.trim() : "";
+  }
+
+  function fieldNumber(id) {
+    const raw = fieldValue(id);
+    if (!raw) return null;
+    const normalized = raw.replace(/[$,\s]/g, "");
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function privateMetric(value, label, source, period) {
+    return { value: Number.isFinite(Number(value)) ? Number(value) : null, source: source || `${label} not provided`, end: period || "", filed: "" };
+  }
+
+  function derivedPrivateMetric(value, source, inputs, period) {
+    return {
+      value: Number.isFinite(Number(value)) ? Number(value) : null,
+      source,
+      sources: inputs.map((item) => item.source).filter(Boolean),
+      end: period || "",
+      filed: ""
+    };
+  }
+
+  function ratioMetric(a, b, label, fn, period) {
+    if (!a || !b || a.value == null || b.value == null || Number(b.value) === 0) {
+      return privateMetric(null, label, `${label} requires both banker/client-provided inputs`, period);
+    }
+    return derivedPrivateMetric(fn(Number(a.value), Number(b.value)), `${label} calculated from banker/client-provided inputs`, [a, b], period);
+  }
+
+  function buildPrivateRisks(metrics, sourceBasis, period) {
+    const risks = [
+      { level: "watch", title: "Private-company source dependency", detail: "This target is not validated through SEC public-company filings; the memo depends on banker/client-provided materials." },
+      { level: "watch", title: "Confidential diligence required", detail: "A private acquisition can proceed, but requires NDA, data room, management materials, QoE, legal, tax, and commercial diligence." }
+    ];
+    if (!sourceBasis || sourceBasis === "Source package not provided") risks.push({ level: "gap", title: "Source package missing", detail: "Private-company analysis requires the basis of materials, such as CIM, management accounts, QoE, or data room extract." });
+    if (!period || period === "Period not provided") risks.push({ level: "gap", title: "Financial period missing", detail: "Revenue and EBITDA must be tied to a defined period before committee use." });
+    if (!hasValue(metrics.revenue)) risks.push({ level: "gap", title: "Revenue not provided", detail: "Scale and revenue-based valuation cannot be assessed without banker/client-provided revenue." });
+    if (!hasValue(metrics.ebitda)) risks.push({ level: "gap", title: "EBITDA not provided", detail: "EBITDA-based leverage and valuation screens cannot be assessed without source materials." });
+    if (!hasValue(metrics.enterpriseValue)) risks.push({ level: "watch", title: "Valuation input withheld", detail: "The app will not invent a purchase price, control premium, or enterprise value for a private target." });
+    return risks;
+  }
+
+  function buildPrivateObservations(name, sector, period, sourceBasis, metrics) {
+    const observations = [
+      `${name} is being treated as a private/confidential acquisition target rather than a public-company SEC filer.`,
+      `Source package: ${sourceBasis}. Financial period: ${period}.`,
+      `Business description / sector: ${sector}.`
+    ];
+    if (hasValue(metrics.revenue)) observations.push(`Revenue is banker/client-provided at ${fmt(metrics.revenue.value)}.`);
+    if (hasValue(metrics.ebitda)) observations.push(`EBITDA is banker/client-provided at ${fmt(metrics.ebitda.value)}; QoE tie-out is required before external use.`);
+    if (hasValue(metrics.netDebt)) observations.push(`Net debt is derived from banker/client-provided debt and cash at ${fmt(metrics.netDebt.value)}.`);
+    observations.push("Private M&A does not require the target to be public; it requires authorized materials, diligence access, and validated banker/client inputs.");
+    return observations;
+  }
+
+  function buildPrivateLimitations() {
+    return [
+      "Private-company mode does not fetch SEC public-company filings, public quote data, market cap, or public trading multiples for the target.",
+      "Any revenue, EBITDA, cash, debt, or provided valuation inputs must come from authorized banker/client materials and require diligence tie-out.",
+      "The app does not infer buyer appetite, synergies, purchase price, DCF, LBO, control premium, fairness, legal, tax, or regulatory conclusions.",
+      "If this app is deployed on shared infrastructure, confidential inputs should only be entered when the deal team has authorization and an approved data-handling process."
+    ];
+  }
+
+  function buildPrivateQuality(metrics, sourceBasis, period) {
+    const checks = [
+      Boolean(sourceBasis && sourceBasis !== "Source package not provided"),
+      Boolean(period && period !== "Period not provided"),
+      hasValue(metrics.revenue),
+      hasValue(metrics.ebitda),
+      hasValue(metrics.cash),
+      hasValue(metrics.debt),
+      hasValue(metrics.enterpriseValue)
+    ];
+    const score = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+    const level = score >= 80 ? "High" : score >= 60 ? "Usable" : score >= 40 ? "Limited" : "Unavailable";
+    return { score, level };
+  }
+
+  function buildPrivateAgents(packet) {
+    const m = packet.metrics;
+    return [
+      {
+        id: "private-intake",
+        role: "Private deal intake banker",
+        mandate: "Convert a non-public target into an auditable acquisition workpaper without pretending public filings exist.",
+        status: packet.privateContext.sourceBasis === "Source package not provided" ? "watch" : "green",
+        confidence: confidenceFromClient([packet.profile.name, packet.privateContext.sourceBasis, packet.privateContext.period]),
+        findings: [
+          `Target: ${packet.profile.name}. Sector / description: ${packet.privateContext.sector}.`,
+          `Source package: ${packet.privateContext.sourceBasis}.`,
+          "Private companies can be acquired; the workflow shifts from public-market evidence to authorized private materials and diligence validation."
+        ],
+        gaps: packet.privateContext.sourceBasis === "Source package not provided" ? ["Source package must be identified before committee use."] : [],
+        nextSteps: ["Confirm NDA status, data room access, management materials, and permitted use of confidential information."]
+      },
+      {
+        id: "private-financials",
+        role: "Private financial diligence analyst",
+        mandate: "Use only banker/client-provided metrics and expose missing diligence inputs.",
+        status: hasValue(m.revenue) && hasValue(m.ebitda) ? "green" : "gap",
+        confidence: confidenceFromClient([hasValue(m.revenue), hasValue(m.ebitda), hasValue(m.cash), hasValue(m.debt)]),
+        findings: [
+          `Revenue: ${fmt(m.revenue.value)}.`,
+          `EBITDA: ${fmt(m.ebitda.value)}; EBITDA margin: ${fmt(metricValue(m.ebitdaMargin), { type: "pct" })}.`,
+          `Cash: ${fmt(m.cash.value)}. Debt: ${fmt(m.debt.value)}. Net debt: ${fmt(m.netDebt.value)}.`
+        ],
+        gaps: [
+          !hasValue(m.revenue) && "Revenue is missing.",
+          !hasValue(m.ebitda) && "EBITDA is missing.",
+          !hasValue(m.cash) && "Cash is missing.",
+          !hasValue(m.debt) && "Debt is missing."
+        ].filter(Boolean),
+        nextSteps: ["Tie provided financials to QoE, management accounts, audited financials, and data room support."]
+      },
+      {
+        id: "private-valuation",
+        role: "Private valuation guardrail analyst",
+        mandate: "Allow valuation discussion only when the banker supplies explicit valuation inputs.",
+        status: hasValue(m.enterpriseValue) ? "green" : "watch",
+        confidence: confidenceFromClient([hasValue(m.enterpriseValue), hasValue(m.revenue), hasValue(m.ebitda)]),
+        findings: [
+          `Provided enterprise value: ${fmt(m.enterpriseValue.value)}.`,
+          `Provided EV / Revenue: ${fmt(metricValue(m.evRevenue), { type: "multiple" })}.`,
+          `Provided EV / EBITDA: ${fmt(metricValue(m.evEbitda), { type: "multiple" })}.`
+        ],
+        gaps: hasValue(m.enterpriseValue) ? [] : ["No purchase price, EV, or valuation range was provided; the app will not invent one."],
+        nextSteps: ["Add banker-approved valuation input or keep the memo as diligence triage only."]
+      },
+      {
+        id: "private-process",
+        role: "Private M&A process advisor",
+        mandate: "Translate private-target gaps into acquisition process steps.",
+        status: "watch",
+        confidence: "Medium",
+        findings: [
+          "A non-public target can still be acquired through bilateral negotiation, auction, sponsor process, carve-out, or negotiated strategic transaction.",
+          "The evidence stack should be NDA, CIM or management presentation, data room, QoE, legal/tax/regulatory review, and financing sources where relevant.",
+          "The memo should distinguish banker-provided facts from unverified management claims."
+        ],
+        gaps: ["Buyer universe, synergies, financing, and purchase agreement risk require explicit banker/client inputs."],
+        nextSteps: ["Build a diligence request list and decision ask before using the memo externally."]
+      }
+    ];
+  }
+
+  function buildPrivateHarness(packet) {
+    const m = packet.metrics;
+    const gates = [
+      clientGate("Private target path selected", true, "critical", "The workflow does not require SEC public-company status."),
+      clientGate("Target name provided", Boolean(packet.profile.name), "critical", packet.profile.name || "Missing target name."),
+      clientGate("Source package identified", packet.privateContext.sourceBasis !== "Source package not provided", "critical", packet.privateContext.sourceBasis),
+      clientGate("Financial period identified", packet.privateContext.period !== "Period not provided", "critical", packet.privateContext.period),
+      clientGate("Revenue provided", hasValue(m.revenue), "important", hasValue(m.revenue) ? fmt(m.revenue.value) : "Missing revenue."),
+      clientGate("EBITDA provided", hasValue(m.ebitda), "important", hasValue(m.ebitda) ? fmt(m.ebitda.value) : "Missing EBITDA."),
+      clientGate("Net debt derivable", hasValue(m.netDebt), "important", hasValue(m.netDebt) ? fmt(m.netDebt.value) : "Requires cash and debt."),
+      clientGate("Valuation input explicitly provided", hasValue(m.enterpriseValue), "advisory", hasValue(m.enterpriseValue) ? fmt(m.enterpriseValue.value) : "No EV or price supplied; valuation outputs withheld."),
+      clientGate("Public-market assumptions suppressed", true, "critical", "No public market cap, quote, public share count, or public trading multiple is invented."),
+      clientGate("Diligence limitations included", packet.limitations.length > 0, "critical", `${packet.limitations.length} limitation statements attached.`)
+    ];
+    const criticalPassed = gates.filter((gate) => gate.severity === "critical").every((gate) => gate.status === "pass");
+    const weighted = gates.reduce((sum, gate) => sum + (gate.status === "pass" ? clientGateWeight(gate.severity) : 0), 0);
+    const possible = gates.reduce((sum, gate) => sum + clientGateWeight(gate.severity), 0);
+    const score = Math.round((weighted / possible) * 100);
+    const blockers = gates.filter((gate) => gate.status !== "pass" && gate.severity !== "advisory");
+    return {
+      score,
+      level: score >= 85 && criticalPassed ? "Committee-ready draft" : score >= 70 && criticalPassed ? "Internal review draft" : "Triage only",
+      readyForExternalUse: score >= 85 && criticalPassed && blockers.length === 0,
+      disposition: blockers.length ? `${blockers.length} private-deal gate${blockers.length === 1 ? "" : "s"} still open.` : "Core private-deal gates cleared.",
+      gates,
+      blockers: blockers.map((gate) => gate.label),
+      nextActions: gates.filter((gate) => gate.status !== "pass").map((gate) => gate.detail).slice(0, 6)
+    };
+  }
+
+  function hasValue(metric) {
+    return metric && metric.value != null && Number.isFinite(Number(metric.value));
+  }
+
+  function confidenceFromClient(values) {
+    const score = values.filter(Boolean).length / values.length;
+    if (score >= 0.8) return "High";
+    if (score >= 0.5) return "Medium";
+    return "Low";
+  }
+
+  function clientGate(label, ok, severity, detail) {
+    return { label, status: ok ? "pass" : "gap", severity, detail };
+  }
+
+  function clientGateWeight(severity) {
+    if (severity === "critical") return 3;
+    if (severity === "important") return 2;
+    return 1;
+  }
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const ticker = tickerInput.value.trim();
@@ -121,7 +429,26 @@
     fetchCompany(ticker, peersInput.value);
   });
 
+  privateForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const packet = buildPrivateDealPacket();
+    if (!packet) return;
+    state.result = packet;
+    state.error = "";
+    state.loading = false;
+    state.selfTest = null;
+    state.activeTab = "overview";
+    updateStatus();
+    setActiveTab("overview");
+    showToast(`Built private-deal memo for ${packet.profile.name}.`);
+  });
+
   document.addEventListener("click", (event) => {
+    const modeButton = event.target.closest("[data-mode]");
+    if (modeButton) {
+      setEntryMode(modeButton.dataset.mode);
+      return;
+    }
     const tabButton = event.target.closest("[data-tab]");
     if (tabButton) {
       setActiveTab(tabButton.dataset.tab);
@@ -133,7 +460,7 @@
       copyMemo();
     }
     if (action.dataset.action === "download-memo") {
-      download(`${fileSafe(state.result.profile.ticker || state.result.profile.cik)}-ib-memo.txt`, buildMemo(), "text/plain");
+      download(`${fileSafe(state.result.profile.ticker || state.result.profile.cik || state.result.profile.name)}-ib-memo.txt`, buildMemo(), "text/plain");
     }
     if (action.dataset.action === "print-memo") {
       state.activeTab = "memo";
@@ -141,7 +468,10 @@
       setTimeout(() => window.print(), 120);
     }
     if (action.dataset.action === "export-json") {
-      download(`${fileSafe(state.result.profile.ticker || state.result.profile.cik)}-live-data.json`, JSON.stringify(state.result, null, 2), "application/json");
+      download(`${fileSafe(state.result.profile.ticker || state.result.profile.cik || state.result.profile.name)}-deal-packet.json`, JSON.stringify(state.result, null, 2), "application/json");
+    }
+    if (action.dataset.action === "run-self-test") {
+      runSelfTest();
     }
   });
 
@@ -184,20 +514,19 @@
       <section class="panel">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">No fabricated company data</p>
-            <h2>Start with a banker-selected public company ticker or SEC CIK</h2>
+            <p class="eyebrow">Product thesis</p>
+            <h2>Turn an acquisition target into a decision memo, not a research dump</h2>
           </div>
         </div>
         <div class="notice strong">
-          This workspace does not preload fabricated numbers. It builds the screen from public SEC EDGAR filings,
-          XBRL company facts, and live-delayed market quote data. If a metric is not available from those sources,
-          the app will mark it as unavailable instead of inventing it.
+          The studio separates what is sourced, what is banker/client-provided, what is unavailable, and what must
+          be cleared before the memo can support an internal deal decision.
         </div>
       </section>
       <section class="grid-3">
         <div class="panel">
-          <p class="eyebrow">What it can do</p>
-          <h2>Public Company Deal Screen</h2>
+          <p class="eyebrow">Public target path</p>
+          <h2>Live public-company evidence</h2>
           <ul class="section-list">
             <li>Resolve ticker to SEC CIK and company profile.</li>
             <li>Pull latest 10-K, 10-Q, 8-K, proxy, and registration filings.</li>
@@ -206,23 +535,33 @@
           </ul>
         </div>
         <div class="panel">
-          <p class="eyebrow">What it will not do</p>
-          <h2>No Fake IB Model</h2>
+          <p class="eyebrow">Private target path</p>
+          <h2>Acquisitions do not require a public ticker</h2>
           <ul class="section-list">
-            <li>No fabricated buyer names, invented private-company numbers, preloaded companies, or preset comps.</li>
-            <li>No DCF, LBO, WACC, synergy, or control-premium model inputs unless a future version accepts explicit banker-provided values.</li>
-            <li>No investment advice. It is a public-data workbench for analyst triage.</li>
+            <li>Use CIM, management accounts, QoE, board materials, lender model, or data room extracts.</li>
+            <li>Private financial inputs are marked as banker/client-provided and processed in the browser.</li>
+            <li>The memo withholds purchase price, synergies, DCF, LBO, and control premium unless explicitly supplied.</li>
           </ul>
         </div>
         <div class="panel">
           <p class="eyebrow">Enterprise posture</p>
-          <h2>Auditability First</h2>
+          <h2>Decision gates before output</h2>
           <ul class="section-list">
-            <li>Every displayed metric carries source tags, filing dates, and API provenance.</li>
+            <li>Every displayed metric carries source tags, filing dates, source package, or input provenance.</li>
             <li>Data gaps are treated as diligence issues, not silently filled.</li>
-            <li>Memo output includes agent findings, harness gates, data limitations, and exact source list.</li>
+            <li>Memo output includes agent findings, product self-test status, harness gates, data limitations, and exact source list.</li>
           </ul>
         </div>
+      </section>
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Product QA Agent</p>
+            <h2>Run a self-test before loading a target</h2>
+          </div>
+          <button class="secondary-button" type="button" data-action="run-self-test">Run self-test</button>
+        </div>
+        ${selfTestPanel()}
       </section>
     `;
   }
@@ -248,11 +587,11 @@
             <p class="eyebrow">Target Overview</p>
             <h2>${escapeHtml(r.profile.name)}</h2>
           </div>
-          <span class="pill ${qualityClass(r.quality.level)}">${r.quality.score}/100 public-data completeness</span>
+          <span class="pill ${qualityClass(r.quality.level)}">${r.quality.score}/100 ${r.mode === "private" ? "private-materials completeness" : "public-data completeness"}</span>
         </div>
         <div class="metric-grid">
-          ${metric("Ticker / Exchange", `${r.profile.ticker || "Not available"} / ${r.profile.exchange || "Not available"}`, r.profile.cik)}
-          ${metric("SEC filer category", r.profile.category || "Not available", r.profile.sicDescription || "")}
+          ${metric(r.mode === "private" ? "Target type" : "Ticker / Exchange", r.mode === "private" ? "Private / confidential" : `${r.profile.ticker || "Not available"} / ${r.profile.exchange || "Not available"}`, r.mode === "private" ? r.privateContext.sourceBasis : r.profile.cik)}
+          ${metric(r.mode === "private" ? "Sector / source basis" : "SEC filer category", r.mode === "private" ? r.profile.sicDescription || "Not provided" : r.profile.category || "Not available", r.mode === "private" ? r.privateContext.period : r.profile.sicDescription || "")}
           ${metric("Latest price", fmt(r.quote && r.quote.close, { type: "price" }), quoteCaption(r.quote))}
           ${metric("Market cap", fmt(m.marketCap), sourceCaption(m.marketCapSource))}
           ${metric("Revenue", fmt(metricValue(m.revenue)), sourceCaption(m.revenue))}
@@ -267,7 +606,7 @@
           <div class="panel-heading compact">
             <div>
               <p class="eyebrow">IB Readout</p>
-              <h2>What the public data supports</h2>
+              <h2>${r.mode === "private" ? "What the provided materials support" : "What the public data supports"}</h2>
             </div>
           </div>
           <ul class="section-list">
@@ -278,7 +617,7 @@
           <div class="panel-heading compact">
             <div>
               <p class="eyebrow">Data Limitations</p>
-              <h2>What still requires company materials</h2>
+              <h2>${r.mode === "private" ? "What still requires diligence" : "What still requires company materials"}</h2>
             </div>
           </div>
           <ul class="risk-list">
@@ -291,27 +630,39 @@
 
   function financialsTab() {
     const r = state.result;
-    const rows = [
-      ["Revenue", r.metrics.revenue],
-      ["Gross profit", r.metrics.grossProfit],
-      ["Operating income", r.metrics.operatingIncome],
-      ["EBITDA, if derivable from XBRL", r.metrics.ebitda],
-      ["Net income", r.metrics.netIncome],
-      ["Assets", r.metrics.assets],
-      ["Cash and equivalents", r.metrics.cash],
-      ["Debt", r.metrics.debt],
-      ["Stockholders equity", r.metrics.equity],
-      ["Operating cash flow", r.metrics.operatingCashFlow],
-      ["Capital expenditure", r.metrics.capex],
-      ["Free cash flow", r.metrics.freeCashFlow],
-      ["Shares outstanding", r.metrics.shares]
-    ];
+    const rows = r.mode === "private"
+      ? [
+          ["Revenue", r.metrics.revenue],
+          ["EBITDA", r.metrics.ebitda],
+          ["EBITDA margin", r.metrics.ebitdaMargin],
+          ["Cash and equivalents", r.metrics.cash],
+          ["Debt", r.metrics.debt],
+          ["Net debt", r.metrics.netDebt],
+          ["Free cash flow", r.metrics.freeCashFlow],
+          ["Assets", r.metrics.assets],
+          ["Equity", r.metrics.equity]
+        ]
+      : [
+          ["Revenue", r.metrics.revenue],
+          ["Gross profit", r.metrics.grossProfit],
+          ["Operating income", r.metrics.operatingIncome],
+          ["EBITDA, if derivable from XBRL", r.metrics.ebitda],
+          ["Net income", r.metrics.netIncome],
+          ["Assets", r.metrics.assets],
+          ["Cash and equivalents", r.metrics.cash],
+          ["Debt", r.metrics.debt],
+          ["Stockholders equity", r.metrics.equity],
+          ["Operating cash flow", r.metrics.operatingCashFlow],
+          ["Capital expenditure", r.metrics.capex],
+          ["Free cash flow", r.metrics.freeCashFlow],
+          ["Shares outstanding", r.metrics.shares]
+        ];
     return `
       <section class="panel">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">SEC XBRL Facts</p>
-            <h2>Reported Financial Metrics</h2>
+            <p class="eyebrow">${r.mode === "private" ? "Private Materials" : "SEC XBRL Facts"}</p>
+            <h2>${r.mode === "private" ? "Banker / Client-Provided Metrics" : "Reported Financial Metrics"}</h2>
           </div>
           <span class="pill">Fetched ${dateFmt(r.fetchedAt)}</span>
         </div>
@@ -321,7 +672,7 @@
       <section class="grid-2">
         <div class="panel">
           <p class="eyebrow">Trend Calculations</p>
-          <h2>Calculated only from disclosed periods</h2>
+          <h2>${r.mode === "private" ? "Calculated only from provided inputs" : "Calculated only from disclosed periods"}</h2>
           <div class="metric-grid">
             ${metric("Revenue growth", fmt(metricValue(r.metrics.revenueGrowth), { type: "pct" }), sourceCaption(r.metrics.revenueGrowth))}
             ${metric("Gross margin", fmt(metricValue(r.metrics.grossMargin), { type: "pct" }), sourceCaption(r.metrics.grossMargin))}
@@ -343,28 +694,37 @@
   function valuationTab() {
     const r = state.result;
     const m = r.metrics;
-    const rows = [
-      ["Share price", r.quote ? r.quote.close : null, quoteCaption(r.quote)],
-      ["Shares outstanding", metricValue(m.shares), sourceCaption(m.shares)],
-      ["Market capitalization", m.marketCap, sourceCaption(m.marketCapSource)],
-      ["Enterprise value", metricValue(m.enterpriseValue), sourceCaption(m.enterpriseValue)],
-      ["EV / Revenue", metricValue(m.evRevenue), sourceCaption(m.evRevenue)],
-      ["EV / EBITDA", metricValue(m.evEbitda), sourceCaption(m.evEbitda)],
-      ["P / E", metricValue(m.priceEarnings), sourceCaption(m.priceEarnings)],
-      ["P / Book", metricValue(m.priceBook), sourceCaption(m.priceBook)]
-    ];
+    const rows = r.mode === "private"
+      ? [
+          ["Provided enterprise value", metricValue(m.enterpriseValue), sourceCaption(m.enterpriseValue)],
+          ["Provided EV / Revenue", metricValue(m.evRevenue), sourceCaption(m.evRevenue)],
+          ["Provided EV / EBITDA", metricValue(m.evEbitda), sourceCaption(m.evEbitda)],
+          ["Net debt", metricValue(m.netDebt), sourceCaption(m.netDebt)],
+          ["Market capitalization", m.marketCap, sourceCaption(m.marketCapSource)]
+        ]
+      : [
+          ["Share price", r.quote ? r.quote.close : null, quoteCaption(r.quote)],
+          ["Shares outstanding", metricValue(m.shares), sourceCaption(m.shares)],
+          ["Market capitalization", m.marketCap, sourceCaption(m.marketCapSource)],
+          ["Enterprise value", metricValue(m.enterpriseValue), sourceCaption(m.enterpriseValue)],
+          ["EV / Revenue", metricValue(m.evRevenue), sourceCaption(m.evRevenue)],
+          ["EV / EBITDA", metricValue(m.evEbitda), sourceCaption(m.evEbitda)],
+          ["P / E", metricValue(m.priceEarnings), sourceCaption(m.priceEarnings)],
+          ["P / Book", metricValue(m.priceBook), sourceCaption(m.priceBook)]
+        ];
     return `
       <section class="panel">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Market-Derived Only</p>
-            <h2>Valuation Outputs</h2>
+            <p class="eyebrow">${r.mode === "private" ? "Provided Inputs Only" : "Market-Derived Only"}</p>
+            <h2>${r.mode === "private" ? "Private Valuation Guardrails" : "Valuation Outputs"}</h2>
           </div>
           <span class="pill ${m.enterpriseValue.value == null ? "amber" : "green"}">No assumption-based range</span>
         </div>
         <div class="notice strong">
-          This screen intentionally does not generate DCF, LBO, synergy, control premium, or target-price outputs.
-          It shows only market-implied figures that can be traced to public quote data and SEC XBRL facts.
+          ${r.mode === "private"
+            ? "Private targets can be acquired, but valuation outputs require explicit banker/client inputs. The app does not invent purchase price, DCF, LBO, synergies, or control premium."
+            : "This screen intentionally does not generate DCF, LBO, synergy, control premium, or target-price outputs. It shows only market-implied figures that can be traced to public quote data and SEC XBRL facts."}
         </div>
       </section>
       <section class="panel">
@@ -379,8 +739,9 @@
       return `
         <section class="panel">
           <div class="empty-state">
-            No peer tickers were provided. Add peer tickers in the input bar and fetch again.
-            The app will not invent a peer set because banker-selected comps are a judgment call.
+            ${state.result.mode === "private"
+              ? "Private target comps are not auto-generated. Add banker-approved public comps in the public target path or document a peer set in banker notes."
+              : "No peer tickers were provided. Add peer tickers in the input bar and fetch again. The app will not invent a peer set because banker-selected comps are a judgment call."}
           </div>
         </section>
       `;
@@ -424,7 +785,7 @@
           <div class="panel-heading compact">
             <div>
               <p class="eyebrow">Risk Register</p>
-              <h2>Public-data flags</h2>
+              <h2>${r.mode === "private" ? "Private-deal diligence flags" : "Public-data flags"}</h2>
             </div>
           </div>
           <ul class="risk-list">
@@ -435,10 +796,10 @@
           <div class="panel-heading compact">
             <div>
               <p class="eyebrow">Recent SEC Filings</p>
-              <h2>Filing intelligence</h2>
+              <h2>${r.mode === "private" ? "Private materials status" : "Filing intelligence"}</h2>
             </div>
           </div>
-          ${filingsTable(r.filings)}
+          ${r.mode === "private" ? privateMaterialsPanel(r) : filingsTable(r.filings)}
         </div>
       </section>
     `;
@@ -470,6 +831,17 @@
       <section class="panel">
         <div class="panel-heading">
           <div>
+            <p class="eyebrow">Product QA Agent</p>
+            <h2>Self-tests product readiness before you trust the workflow</h2>
+          </div>
+          <button class="secondary-button" type="button" data-action="run-self-test">Run self-test</button>
+        </div>
+        ${selfTestPanel()}
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
             <p class="eyebrow">Harness</p>
             <h2>Memo readiness gates</h2>
           </div>
@@ -477,6 +849,36 @@
         </div>
         ${harnessTable(harness.gates || [])}
       </section>
+    `;
+  }
+
+  function selfTestPanel() {
+    if (!state.selfTest) {
+      return `<div class="empty-state">The QA agent checks product thesis, private-target support, absence of preloaded company shortcuts, static assets, SEC configuration, and harness availability.</div>`;
+    }
+    return `
+      <div class="notice strong">
+        <strong>${escapeHtml(state.selfTest.agent.role)}:</strong>
+        ${escapeHtml(state.selfTest.agent.summary)}
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Check</th><th>Status</th><th>Evidence</th></tr></thead>
+          <tbody>
+            ${state.selfTest.checks
+              .map(
+                (check) => `
+                <tr>
+                  <td><strong>${escapeHtml(check.label)}</strong></td>
+                  <td><span class="status-chip ${check.status === "pass" ? "good" : "gap"}">${escapeHtml(check.status)}</span></td>
+                  <td>${escapeHtml(check.detail)}</td>
+                </tr>
+              `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
     `;
   }
 
@@ -633,10 +1035,15 @@
             ${rows
               .map(([label, metricObj]) => {
                 const value = metricValue(metricObj);
+                const display = label.toLowerCase().includes("margin") || label.toLowerCase().includes("growth")
+                  ? fmt(value, { type: "pct" })
+                  : label === "Shares outstanding"
+                    ? fmt(value, { type: "integer" })
+                    : fmt(value);
                 return `
                   <tr>
                     <td><strong>${escapeHtml(label)}</strong></td>
-                    <td>${escapeHtml(label === "Shares outstanding" ? fmt(value, { type: "integer" }) : fmt(value))}</td>
+                    <td>${escapeHtml(display)}</td>
                     <td>${escapeHtml(sourceCaption(metricObj))}</td>
                     <td>${escapeHtml(metricObj && metricObj.filed ? dateFmt(metricObj.filed) : "Not available")}</td>
                   </tr>
@@ -707,6 +1114,33 @@
     `;
   }
 
+  function privateMaterialsPanel(result) {
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Private source item</th><th>Status</th><th>Use in memo</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Source package</strong></td>
+              <td>${escapeHtml(result.privateContext.sourceBasis)}</td>
+              <td>Basis for banker/client-provided facts.</td>
+            </tr>
+            <tr>
+              <td><strong>Financial period</strong></td>
+              <td>${escapeHtml(result.privateContext.period)}</td>
+              <td>Period tie-out for revenue, EBITDA, cash, debt, and optional valuation inputs.</td>
+            </tr>
+            <tr>
+              <td><strong>Public filings</strong></td>
+              <td>Not applicable</td>
+              <td>Private-company acquisition path does not depend on SEC public-company filings.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   function qualityClass(level) {
     if (level === "High") return "green";
     if (level === "Usable") return "watch";
@@ -722,6 +1156,7 @@
 
   function buildMemo() {
     const r = state.result;
+    if (r.mode === "private") return buildPrivateMemo(r);
     const m = r.metrics;
     const lines = [];
     lines.push(`${r.profile.name} (${r.profile.ticker || r.profile.cik}) - Public Data Deal Triage Memo`);
@@ -787,6 +1222,53 @@
     return lines.join("\n");
   }
 
+  function buildPrivateMemo(r) {
+    const m = r.metrics;
+    const lines = [];
+    lines.push(`${r.profile.name} - Private / Confidential Acquisition Triage Memo`);
+    lines.push(`Generated: ${new Date().toLocaleString()}`);
+    lines.push("");
+    lines.push("1. Product Purpose");
+    lines.push("This memo turns a non-public acquisition target into a decision-ready triage workpaper by separating banker/client-provided facts, unavailable assumptions, diligence gaps, and review gates.");
+    lines.push("A target does not need to be public to be acquired. For private targets, the evidence base shifts to authorized private materials and diligence validation.");
+    lines.push("");
+    lines.push("2. Source Basis");
+    lines.push(`Source package: ${r.privateContext.sourceBasis}. Financial period: ${r.privateContext.period}.`);
+    lines.push("No SEC public-company filing, market quote, market cap, or public share count is assumed for this private target.");
+    lines.push("");
+    lines.push("3. Agent Workstream Readout");
+    (r.agents || []).forEach((agent) => {
+      lines.push(`${agent.role} (${agent.confidence} confidence):`);
+      (agent.findings || []).slice(0, 3).forEach((item) => lines.push(`- ${item}`));
+      if (agent.gaps && agent.gaps.length) lines.push(`- Open gap: ${agent.gaps[0]}`);
+    });
+    lines.push("");
+    lines.push("4. Harness / Readiness Gates");
+    if (r.harness) {
+      lines.push(`Harness status: ${r.harness.level}; score ${r.harness.score}/100. ${r.harness.disposition}`);
+      (r.harness.gates || []).forEach((gate) => lines.push(`- ${gate.status.toUpperCase()} / ${gate.severity}: ${gate.label} - ${gate.detail}`));
+    }
+    lines.push("");
+    lines.push("5. Provided Financial Profile");
+    lines.push(`Revenue: ${fmt(metricValue(m.revenue))}. EBITDA: ${fmt(metricValue(m.ebitda))}. EBITDA margin: ${fmt(metricValue(m.ebitdaMargin), { type: "pct" })}.`);
+    lines.push(`Cash: ${fmt(metricValue(m.cash))}. Debt: ${fmt(metricValue(m.debt))}. Net debt: ${fmt(metricValue(m.netDebt))}.`);
+    lines.push(`Provided enterprise value: ${fmt(metricValue(m.enterpriseValue))}. Provided EV / Revenue: ${fmt(metricValue(m.evRevenue), { type: "multiple" })}. Provided EV / EBITDA: ${fmt(metricValue(m.evEbitda), { type: "multiple" })}.`);
+    lines.push("");
+    lines.push("6. Diligence Flags");
+    r.risks.forEach((risk) => lines.push(`- ${risk.title}: ${risk.detail}`));
+    lines.push("");
+    lines.push("7. Banker-Provided Context");
+    lines.push(`Mandate context: ${state.notes.mandate || "Not provided."}`);
+    lines.push(`Decision requested: ${state.notes.decision || "Not provided."}`);
+    lines.push(`Internal notes: ${state.notes.bankerNotes || "Not provided."}`);
+    lines.push("");
+    lines.push("8. Limitations");
+    r.limitations.forEach((item) => lines.push(`- ${item}`));
+    lines.push("");
+    lines.push("This output is a private-target analytical workpaper, not investment, legal, tax, accounting, or regulatory advice.");
+    return lines.join("\n");
+  }
+
   function copyMemo() {
     const memo = buildMemo();
     if (navigator.clipboard && window.isSecureContext) {
@@ -800,6 +1282,25 @@
     document.execCommand("copy");
     textarea.remove();
     showToast("Memo copied.");
+  }
+
+  async function runSelfTest() {
+    try {
+      showToast("Product QA agent is running.");
+      const response = await fetch("/api/self-test");
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Self-test failed.");
+      state.selfTest = payload;
+      render();
+      showToast(payload.ok ? "Product self-test passed." : "Product self-test found gaps.");
+    } catch (error) {
+      state.selfTest = {
+        ok: false,
+        agent: { role: "Product QA Agent", summary: error.message || String(error) },
+        checks: [{ label: "Self-test endpoint", status: "gap", detail: error.message || String(error) }]
+      };
+      render();
+    }
   }
 
   function download(name, content, type) {
@@ -818,6 +1319,7 @@
     return String(value || "company").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
   }
 
+  setEntryMode(state.entryMode);
   render();
   updateStatus();
 })();

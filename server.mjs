@@ -53,6 +53,10 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { ok: true, secUserAgentConfigured: Boolean(process.env.SEC_USER_AGENT) });
       return;
     }
+    if (url.pathname === "/api/self-test") {
+      sendJson(res, 200, await runProductSelfTest());
+      return;
+    }
     if (url.pathname === "/api/search") {
       const q = (url.searchParams.get("q") || "").trim();
       sendJson(res, 200, await searchCompanies(q));
@@ -550,6 +554,43 @@ function collectSources(metrics, filings, quote) {
   }
   if (filings && filings[0]) sources.add(`Latest screened filing: ${filings[0].form} filed ${filings[0].filingDate}`);
   return Array.from(sources).slice(0, 60);
+}
+
+async function runProductSelfTest() {
+  const [indexHtml, appJs, packageJson, smokeScript] = await Promise.all([
+    readTextFile("index.html"),
+    readTextFile("app.js"),
+    readTextFile("package.json"),
+    readTextFile("scripts/smoke.mjs"),
+  ]);
+  const checks = [
+    qaCheck("Product thesis is explicit", indexHtml.includes("turn a target into a decision-ready acquisition triage memo"), "Homepage states the product is a deal decision memo workflow, not generic research."),
+    qaCheck("Private target path exists", indexHtml.includes("privateForm") && appJs.includes("buildPrivateDealPacket"), "Private / confidential targets can be handled from banker/client-provided materials."),
+    qaCheck("No preloaded company shortcut buttons", !indexHtml.includes("data-example") && !appJs.includes("data-example"), "No first-screen company shortcuts or canned comps are wired into the product."),
+    qaCheck("No hard-coded company examples in UI", !/(AAPL|JPM|MSFT|NVDA|GOOGL)/.test(indexHtml + appJs), "The UI does not steer users toward a fixed demo company universe."),
+    qaCheck("Multi-agent memo tab exists", indexHtml.includes("Agents & Harness") && appJs.includes("agentCard"), "Role-based workstreams are exposed in the app."),
+    qaCheck("Product QA agent endpoint exists", appJs.includes("/api/self-test"), "The frontend can trigger this self-test endpoint."),
+    qaCheck("Harness script is available", smokeScript.includes("HARNESS_TICKER") && packageJson.includes("\"harness\""), "Deployment smoke/data-quality harness is present and configurable."),
+    qaCheck("SEC user agent configured", Boolean(process.env.SEC_USER_AGENT), process.env.SEC_USER_AGENT ? "SEC_USER_AGENT is configured." : "SEC_USER_AGENT is not configured."),
+  ];
+  const ok = checks.every((check) => check.status === "pass");
+  return {
+    ok,
+    ranAt: new Date().toISOString(),
+    agent: {
+      role: "Product QA Agent",
+      summary: ok ? "All product self-test gates passed." : `${checks.filter((check) => check.status !== "pass").length} product self-test gate(s) require attention.`,
+    },
+    checks,
+  };
+}
+
+async function readTextFile(relativePath) {
+  return readFile(path.join(__dirname, relativePath), "utf8");
+}
+
+function qaCheck(label, ok, detail) {
+  return { label, status: ok ? "pass" : "gap", detail };
 }
 
 function buildAgentWorkstreams(company) {
