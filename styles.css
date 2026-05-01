@@ -241,24 +241,13 @@ h3 {
   color: var(--accent);
 }
 
-.example-row {
+.workflow-note {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
   margin-top: 10px;
   color: var(--muted);
   font-size: 0.88rem;
-}
-
-.example-row button {
-  min-height: 30px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-weight: 800;
+  line-height: 1.45;
 }
 
 .status-strip {
@@ -357,6 +346,16 @@ h3 {
 
 .grid-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agent-card h3 {
+  margin-top: 14px;
 }
 
 .metric-grid {
@@ -599,6 +598,7 @@ td {
   .grid-2,
   .grid-3,
   .grid-4,
+  .agent-grid,
   .metric-grid {
     grid-template-columns: 1fr;
   }

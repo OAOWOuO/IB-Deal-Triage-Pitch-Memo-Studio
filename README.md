@@ -17,6 +17,19 @@ Then open:
 http://127.0.0.1:4173
 ```
 
+## Quality Harness
+
+```bash
+npm run check
+npm run harness
+```
+
+By default, the harness checks the server health endpoint, static assets, and controlled API validation without using a fixed company fixture. To exercise the live SEC and quote pipeline with a banker-selected target:
+
+```bash
+HARNESS_TICKER="YOUR_TICKER" HARNESS_PEERS="PEER1,PEER2" npm run harness
+```
+
 ## Deploy On Render
 
 1. Push this folder to a GitHub repository.
@@ -35,7 +48,9 @@ The server binds to `0.0.0.0` and uses Render's `PORT` environment variable when
 - SEC EDGAR submissions API: company identity and recent filing metadata.
 - SEC EDGAR companyfacts API: XBRL-tagged financial facts.
 - Public quote feed: used only to derive market cap and market-based multiples when available.
-- No fabricated company data, preset comps, DCF model inputs, LBO model inputs, control premiums, or invented buyer lists.
+- Multi-agent memo workstreams: role-based deterministic analysis over the same sourced public-data packet.
+- Harness gates: validates source basis, filing availability, quote/valuation traceability, peer explicitness, and assumption suppression.
+- No fabricated company data, preloaded company shortcuts, preset comps, DCF model inputs, LBO model inputs, control premiums, or invented buyer lists.
 - Missing public data is shown as unavailable and becomes a diligence/control gap.
 
 This tool is a public-data analytical workpaper. It is not investment, legal, tax, accounting, or regulatory advice.

@@ -13,7 +13,7 @@
     }
   };
 
-  const tabs = ["overview", "financials", "valuation", "peers", "risks", "memo", "controls"];
+  const tabs = ["overview", "financials", "valuation", "peers", "risks", "agents", "memo", "controls"];
 
   const form = document.getElementById("companyForm");
   const tickerInput = document.getElementById("tickerInput");
@@ -127,13 +127,6 @@
       setActiveTab(tabButton.dataset.tab);
       return;
     }
-    const example = event.target.closest("[data-example]");
-    if (example) {
-      tickerInput.value = example.dataset.example;
-      peersInput.value = example.dataset.peers || "";
-      fetchCompany(tickerInput.value, peersInput.value);
-      return;
-    }
     const action = event.target.closest("[data-action]");
     if (!action) return;
     if (action.dataset.action === "copy-memo") {
@@ -192,7 +185,7 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">No fabricated company data</p>
-            <h2>Start with a real public company ticker or SEC CIK</h2>
+            <h2>Start with a banker-selected public company ticker or SEC CIK</h2>
           </div>
         </div>
         <div class="notice strong">
@@ -209,13 +202,14 @@
             <li>Resolve ticker to SEC CIK and company profile.</li>
             <li>Pull latest 10-K, 10-Q, 8-K, proxy, and registration filings.</li>
             <li>Extract reported revenue, net income, assets, cash, debt, equity, cash flow, capex, shares, and more when XBRL tags exist.</li>
+            <li>Run role-based analyst workstreams and memo-readiness harness gates over the same sourced packet.</li>
           </ul>
         </div>
         <div class="panel">
           <p class="eyebrow">What it will not do</p>
           <h2>No Fake IB Model</h2>
           <ul class="section-list">
-            <li>No fabricated buyer names, invented private-company numbers, or preset comps.</li>
+            <li>No fabricated buyer names, invented private-company numbers, preloaded companies, or preset comps.</li>
             <li>No DCF, LBO, WACC, synergy, or control-premium model inputs unless a future version accepts explicit banker-provided values.</li>
             <li>No investment advice. It is a public-data workbench for analyst triage.</li>
           </ul>
@@ -226,7 +220,7 @@
           <ul class="section-list">
             <li>Every displayed metric carries source tags, filing dates, and API provenance.</li>
             <li>Data gaps are treated as diligence issues, not silently filled.</li>
-            <li>Memo output includes data limitations and exact source list.</li>
+            <li>Memo output includes agent findings, harness gates, data limitations, and exact source list.</li>
           </ul>
         </div>
       </section>
@@ -238,6 +232,7 @@
     if (state.activeTab === "valuation") return valuationTab();
     if (state.activeTab === "peers") return peersTab();
     if (state.activeTab === "risks") return risksTab();
+    if (state.activeTab === "agents") return agentsTab();
     if (state.activeTab === "memo") return memoTab();
     if (state.activeTab === "controls") return controlsTab();
     return overviewTab();
@@ -449,13 +444,96 @@
     `;
   }
 
+  function agentsTab() {
+    const r = state.result;
+    const agents = r.agents || [];
+    const harness = r.harness || { gates: [], score: 0, level: "Unavailable", disposition: "Harness not available." };
+    return `
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Role-Based Memo Orchestration</p>
+            <h2>Analyst agents run on the same sourced data packet</h2>
+          </div>
+          <span class="pill ${harness.readyForExternalUse ? "green" : "amber"}">${escapeHtml(harness.level)} / ${escapeHtml(String(harness.score))}</span>
+        </div>
+        <div class="notice strong">
+          These are deterministic analyst workstreams, not hidden assumptions. Each role can only use the target packet,
+          banker-supplied peers, SEC facts, filing metadata, quote data, and explicit unavailable flags.
+        </div>
+      </section>
+
+      <section class="agent-grid">
+        ${agents.map(agentCard).join("")}
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Harness</p>
+            <h2>Memo readiness gates</h2>
+          </div>
+          <span class="pill ${harness.readyForExternalUse ? "green" : "amber"}">${escapeHtml(harness.disposition || "")}</span>
+        </div>
+        ${harnessTable(harness.gates || [])}
+      </section>
+    `;
+  }
+
+  function agentCard(agent) {
+    return `
+      <section class="panel agent-card">
+        <div class="panel-heading compact">
+          <div>
+            <p class="eyebrow">${escapeHtml(agent.role)}</p>
+            <h2>${escapeHtml(agent.mandate)}</h2>
+          </div>
+          <span class="status-chip ${agentStatusClass(agent.status)}">${escapeHtml(agent.confidence)} confidence</span>
+        </div>
+        <h3>Findings</h3>
+        <ul class="section-list">
+          ${(agent.findings || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        ${agent.gaps && agent.gaps.length ? `<h3>Open gaps</h3><ul class="risk-list">${agent.gaps.map((item) => `<li class="watch">${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+        <h3>Next step</h3>
+        <ul class="source-list">
+          ${(agent.nextSteps || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </section>
+    `;
+  }
+
+  function harnessTable(gates) {
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Gate</th><th>Status</th><th>Severity</th><th>Evidence / action</th></tr></thead>
+          <tbody>
+            ${gates
+              .map(
+                (gate) => `
+                <tr>
+                  <td><strong>${escapeHtml(gate.label)}</strong></td>
+                  <td><span class="status-chip ${gate.status === "pass" ? "good" : "gap"}">${escapeHtml(gate.status)}</span></td>
+                  <td>${escapeHtml(gate.severity)}</td>
+                  <td>${escapeHtml(gate.detail)}</td>
+                </tr>
+              `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   function memoTab() {
     return `
       <section class="panel printable">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Generated From Live Public Sources</p>
-            <h2>Banker Memo</h2>
+            <h2>Multi-Agent Banker Memo</h2>
           </div>
           <div class="button-row">
             <button class="secondary-button" type="button" data-action="copy-memo">Copy</button>
@@ -471,27 +549,19 @@
 
   function controlsTab() {
     const r = state.result;
-    const gates = [
-      ["SEC identity resolved", Boolean(r.profile.cik)],
-      ["Latest filings available", Boolean(r.filings && r.filings.length)],
-      ["Quote available", Boolean(r.quote && r.quote.close)],
-      ["Shares outstanding available", r.metrics.shares.value != null],
-      ["Enterprise value derivable", r.metrics.enterpriseValue.value != null],
-      ["Peer set explicitly supplied by banker", Boolean(r.peers && r.peers.length)],
-      ["Memo includes data limitations", true]
-    ];
+    const harness = r.harness || { gates: [], level: r.quality.level, score: r.quality.score };
     return `
       <section class="panel">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Workflow and Quality Control</p>
-            <h2>Controls are now here, not pinned across every tab</h2>
+            <h2>Case controls and banker inputs</h2>
           </div>
-          <span class="pill ${qualityClass(r.quality.level)}">${escapeHtml(r.quality.level)}</span>
+          <span class="pill ${harness.readyForExternalUse ? "green" : "amber"}">${escapeHtml(harness.level)} / ${escapeHtml(String(harness.score))}</span>
         </div>
         <ul class="quality-list">
-          ${gates
-            .map(([label, ok]) => `<li><strong class="status-chip ${ok ? "good" : "gap"}">${ok ? "OK" : "Gap"}</strong> ${escapeHtml(label)}</li>`)
+          ${(harness.gates || [])
+            .map((gate) => `<li><strong class="status-chip ${gate.status === "pass" ? "good" : "gap"}">${escapeHtml(gate.status)}</strong> ${escapeHtml(gate.label)} <small>${escapeHtml(gate.detail)}</small></li>`)
             .join("")}
         </ul>
       </section>
@@ -502,7 +572,7 @@
           <h2>Banker-provided, not fabricated</h2>
           <div class="field">
             <label for="mandateNote">Mandate / transaction context</label>
-            <textarea id="mandateNote" data-note="mandate" placeholder="Example: board has requested a public-company trading screen for a potential strategic alternatives discussion.">${escapeHtml(
+            <textarea id="mandateNote" data-note="mandate" placeholder="Enter banker-provided mandate, transaction type, committee audience, and confidentiality context.">${escapeHtml(
               state.notes.mandate
             )}</textarea>
           </div>
@@ -512,7 +582,7 @@
           <h2>Review ask</h2>
           <div class="field">
             <label for="decisionNote">Decision requested</label>
-            <textarea id="decisionNote" data-note="decision" placeholder="Example: approve moving to a preliminary buyer / investor mapping exercise.">${escapeHtml(
+            <textarea id="decisionNote" data-note="decision" placeholder="Enter the specific decision or next-step approval requested from the deal team.">${escapeHtml(
               state.notes.decision
             )}</textarea>
           </div>
@@ -644,6 +714,12 @@
     return "gap";
   }
 
+  function agentStatusClass(status) {
+    if (status === "green" || status === "pass") return "good";
+    if (status === "watch") return "watch";
+    return "gap";
+  }
+
   function buildMemo() {
     const r = state.result;
     const m = r.metrics;
@@ -655,21 +731,42 @@
     lines.push(`This memo uses public SEC EDGAR filings/XBRL company facts and public market quote data only. No fabricated company data, banker assumptions, DCF, LBO, synergy, or control premium inputs are included.`);
     lines.push(`SEC CIK: ${r.profile.cik}. Latest filing shown: ${r.filings[0] ? `${r.filings[0].form} filed ${r.filings[0].filingDate}` : "not available"}.`);
     lines.push("");
-    lines.push("2. Public Trading Snapshot");
+    lines.push("2. Agent Workstream Readout");
+    if (r.agents && r.agents.length) {
+      r.agents.forEach((agent) => {
+        lines.push(`${agent.role} (${agent.confidence} confidence):`);
+        (agent.findings || []).slice(0, 3).forEach((item) => lines.push(`- ${item}`));
+        if (agent.gaps && agent.gaps.length) lines.push(`- Open gap: ${agent.gaps[0]}`);
+      });
+    } else {
+      lines.push("- Agent workstreams were not available for this data packet.");
+    }
+    lines.push("");
+    lines.push("3. Harness / Readiness Gates");
+    if (r.harness) {
+      lines.push(`Harness status: ${r.harness.level}; score ${r.harness.score}/100. ${r.harness.disposition}`);
+      (r.harness.gates || []).forEach((gate) => {
+        lines.push(`- ${gate.status.toUpperCase()} / ${gate.severity}: ${gate.label} - ${gate.detail}`);
+      });
+    } else {
+      lines.push("- Harness output was not available.");
+    }
+    lines.push("");
+    lines.push("4. Public Trading Snapshot");
     lines.push(`Share price: ${fmt(r.quote && r.quote.close, { type: "price" })}. Market cap: ${fmt(m.marketCap)}. Enterprise value: ${fmt(metricValue(m.enterpriseValue))}.`);
     lines.push(`EV / Revenue: ${fmt(metricValue(m.evRevenue), { type: "multiple" })}. EV / EBITDA: ${fmt(metricValue(m.evEbitda), { type: "multiple" })}. P / E: ${fmt(metricValue(m.priceEarnings), { type: "multiple" })}. P / Book: ${fmt(metricValue(m.priceBook), { type: "multiple" })}.`);
     lines.push("");
-    lines.push("3. Reported Financial Profile");
+    lines.push("5. Reported Financial Profile");
     lines.push(`Revenue: ${fmt(metricValue(m.revenue))}. Revenue growth: ${fmt(metricValue(m.revenueGrowth), { type: "pct" })}. Net income: ${fmt(metricValue(m.netIncome))}. Free cash flow: ${fmt(metricValue(m.freeCashFlow))}.`);
     lines.push(`Assets: ${fmt(metricValue(m.assets))}. Cash: ${fmt(metricValue(m.cash))}. Debt: ${fmt(metricValue(m.debt))}. Equity: ${fmt(metricValue(m.equity))}.`);
     lines.push("");
-    lines.push("4. Banker Observations");
+    lines.push("6. Banker Observations");
     r.observations.forEach((item) => lines.push(`- ${item}`));
     lines.push("");
-    lines.push("5. Risks / Data Gaps");
+    lines.push("7. Risks / Data Gaps");
     r.risks.forEach((risk) => lines.push(`- ${risk.title}: ${risk.detail}`));
     lines.push("");
-    lines.push("6. Peer Set");
+    lines.push("8. Peer Set");
     if (r.peers && r.peers.length) {
       r.peers.forEach((peer) => {
         lines.push(`- ${peer.profile.ticker || peer.profile.cik} / ${peer.profile.name}: market cap ${fmt(peer.metrics.marketCap)}, EV/Revenue ${fmt(metricValue(peer.metrics.evRevenue), { type: "multiple" })}, data quality ${peer.quality.score}/100.`);
@@ -678,12 +775,12 @@
       lines.push("- No peer tickers were supplied. A banker-selected peer set is required before using this for relative valuation discussion.");
     }
     lines.push("");
-    lines.push("7. Banker-Provided Context");
+    lines.push("9. Banker-Provided Context");
     lines.push(`Mandate context: ${state.notes.mandate || "Not provided."}`);
     lines.push(`Decision requested: ${state.notes.decision || "Not provided."}`);
     lines.push(`Internal notes: ${state.notes.bankerNotes || "Not provided."}`);
     lines.push("");
-    lines.push("8. Limitations");
+    lines.push("10. Limitations");
     r.limitations.forEach((item) => lines.push(`- ${item}`));
     lines.push("");
     lines.push("This output is a public-data analytical workpaper, not investment, legal, tax, accounting, or regulatory advice.");

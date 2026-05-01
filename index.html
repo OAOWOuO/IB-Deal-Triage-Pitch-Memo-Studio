@@ -26,19 +26,16 @@
         <form id="companyForm" class="query-form">
           <div class="field ticker-field">
             <label for="tickerInput">Target ticker or CIK</label>
-            <input id="tickerInput" name="ticker" autocomplete="off" placeholder="AAPL, JPM, MSFT, 0000320193" />
+            <input id="tickerInput" name="ticker" autocomplete="off" placeholder="Enter a public-company ticker or SEC CIK" />
           </div>
           <div class="field peer-field">
             <label for="peersInput">Peer tickers, optional</label>
-            <input id="peersInput" name="peers" autocomplete="off" placeholder="MSFT,NVDA,GOOGL" />
+            <input id="peersInput" name="peers" autocomplete="off" placeholder="Comma-separated banker-selected peer tickers" />
           </div>
           <button class="primary-button" type="submit">Fetch live data</button>
         </form>
-        <div class="example-row" aria-label="Real company shortcuts">
-          <span>Real company examples:</span>
-          <button type="button" data-example="AAPL" data-peers="MSFT,NVDA,GOOGL">AAPL</button>
-          <button type="button" data-example="JPM" data-peers="BAC,WFC,C">JPM</button>
-          <button type="button" data-example="V" data-peers="MA,AXP,PYPL">V</button>
+        <div class="workflow-note" aria-label="Research discipline">
+          No preloaded companies or canned comps. Target and peer universe must be entered by the banker so the workpaper has an auditable deal context.
         </div>
       </section>
 
@@ -67,8 +64,9 @@
         <button type="button" class="tab" data-tab="valuation">Market & Valuation</button>
         <button type="button" class="tab" data-tab="peers">Peers</button>
         <button type="button" class="tab" data-tab="risks">Filings & Risks</button>
+        <button type="button" class="tab" data-tab="agents">Agents & Harness</button>
         <button type="button" class="tab" data-tab="memo">Memo</button>
-        <button type="button" class="tab" data-tab="controls">Controls</button>
+        <button type="button" class="tab" data-tab="controls">Case Controls</button>
       </nav>
 
       <main id="workspace" class="workspace" aria-live="polite"></main>
